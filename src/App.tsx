@@ -7,7 +7,8 @@ import {
 import { 
   LayoutDashboard, Table as TableIcon, BarChart3, Settings, 
   ChevronDown, Download, RefreshCw, AlertCircle, Search,
-  Users, BookOpen, Heart, Activity, Calendar, TrendingUp, TrendingDown, Minus, MessageSquare
+  Users, BookOpen, Heart, Activity, Calendar, TrendingUp, TrendingDown, Minus, MessageSquare,
+  Menu, X
 } from 'lucide-react';
 import { MajlisData, Month, MONTHS, FIELD_LABELS } from './types';
 import { fetchSheetData } from './services/googleSheets';
@@ -29,6 +30,7 @@ export default function App() {
   const [view, setView] = useState<'dashboard' | 'table'>('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRatioField, setSelectedRatioField] = useState<keyof MajlisData>('generalMeetingAttendance');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const loadData = async (month: Month) => {
     setLoading(true);
@@ -134,22 +136,65 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      {/* Mobile Header */}
+      <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
+            <LayoutDashboard size={18} />
+          </div>
+          <h1 className="font-bold text-sm">Majlis Dash</h1>
+        </div>
+        <button 
+          onClick={() => setIsSidebarOpen(true)}
+          className="p-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+        >
+          <Menu size={24} />
+        </button>
+      </div>
+
+      {/* Sidebar Overlay */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsSidebarOpen(false)}
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 lg:hidden"
+          />
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full w-64 bg-white border-r border-slate-200 z-50 hidden lg:block">
-        <div className="p-6">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
-              <LayoutDashboard size={24} />
+      <aside className={cn(
+        "fixed left-0 top-0 h-full w-64 bg-white border-r border-slate-200 z-50 transition-transform duration-300 lg:translate-x-0",
+        isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+      )}>
+        <div className="p-6 h-full flex flex-col">
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+                <LayoutDashboard size={24} />
+              </div>
+              <div>
+                <h1 className="font-bold text-lg leading-tight">Majlis Dash</h1>
+                <p className="text-xs text-slate-500 font-medium">Analysis 2026</p>
+              </div>
             </div>
-            <div>
-              <h1 className="font-bold text-lg leading-tight">Majlis Dash</h1>
-              <p className="text-xs text-slate-500 font-medium">Analysis 2026</p>
-            </div>
+            <button 
+              onClick={() => setIsSidebarOpen(false)}
+              className="lg:hidden p-2 text-slate-400 hover:bg-slate-50 rounded-lg"
+            >
+              <X size={20} />
+            </button>
           </div>
 
           <nav className="space-y-1">
             <button 
-              onClick={() => setView('dashboard')}
+              onClick={() => {
+                setView('dashboard');
+                setIsSidebarOpen(false);
+              }}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200",
                 view === 'dashboard' ? "bg-indigo-50 text-indigo-600 font-semibold" : "text-slate-500 hover:bg-slate-50"
@@ -159,7 +204,10 @@ export default function App() {
               Dashboard
             </button>
             <button 
-              onClick={() => setView('table')}
+              onClick={() => {
+                setView('table');
+                setIsSidebarOpen(false);
+              }}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200",
                 view === 'table' ? "bg-indigo-50 text-indigo-600 font-semibold" : "text-slate-500 hover:bg-slate-50"
@@ -170,13 +218,16 @@ export default function App() {
             </button>
           </nav>
 
-          <div className="mt-12">
+          <div className="mt-12 flex-1 overflow-y-auto pb-6">
             <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-4">Select Month</p>
             <div className="grid grid-cols-2 gap-2 px-2">
               {MONTHS.map(m => (
                 <button
                   key={m}
-                  onClick={() => setSelectedMonth(m)}
+                  onClick={() => {
+                    setSelectedMonth(m);
+                    setIsSidebarOpen(false);
+                  }}
                   className={cn(
                     "px-2 py-2 rounded-lg text-xs font-medium transition-all",
                     selectedMonth === m ? "bg-indigo-600 text-white shadow-md" : "bg-slate-50 text-slate-600 hover:bg-slate-100"
