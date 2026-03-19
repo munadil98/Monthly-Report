@@ -32,30 +32,31 @@ async function fetchGoogleSheetsData(month: string) {
 
 const app = express();
 
+// API Routes - MUST be registered before static middleware
+app.get("/api/data", async (req, res) => {
+  console.log(`[API] GET /api/data - month: ${req.query.month}`);
+  try {
+    const month = req.query.month as string || 'Jan26';
+    const values = await fetchGoogleSheetsData(month);
+    console.log(`[API] Successfully fetched ${values?.length || 0} rows`);
+    res.json(values);
+  } catch (error: any) {
+    console.error("[API] Error fetching data:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", mode: process.env.NODE_ENV || "development" });
+});
+
 async function startServer() {
   const PORT = 3000;
 
   console.log("Starting server in", process.env.NODE_ENV || "development", "mode");
 
-  // API Routes
-  app.get("/api/data", async (req, res) => {
-    try {
-      const month = req.query.month as string || 'Jan26';
-      console.log(`Fetching data for month: ${month}`);
-      const values = await fetchGoogleSheetsData(month);
-      res.json(values);
-    } catch (error: any) {
-      console.error("Error fetching data:", error.message);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", mode: process.env.NODE_ENV || "development" });
-  });
-
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
     console.log("Initializing Vite in development mode...");
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -80,7 +81,13 @@ async function startServer() {
     const distPath = path.join(process.cwd(), 'dist');
     console.log(`Serving static files from: ${distPath}`);
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    
+    // Catch-all route for SPA - but ignore /api routes
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api')) {
+        return next();
+      }
+      
       const indexPath = path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
