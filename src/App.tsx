@@ -1,0 +1,494 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
+} from 'recharts';
+import { 
+  LayoutDashboard, Table as TableIcon, BarChart3, Settings, 
+  ChevronDown, Download, RefreshCw, AlertCircle, Search,
+  Users, BookOpen, Heart, Activity, Calendar, TrendingUp, TrendingDown, Minus, MessageSquare
+} from 'lucide-react';
+import { MajlisData, Month, MONTHS, FIELD_LABELS } from './types';
+import { fetchSheetData } from './services/googleSheets';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
+
+export default function App() {
+  const [selectedMonth, setSelectedMonth] = useState<Month>('Jan26');
+  const [data, setData] = useState<MajlisData[]>([]);
+  const [prevData, setPrevData] = useState<MajlisData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<'dashboard' | 'table'>('dashboard');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedRatioField, setSelectedRatioField] = useState<keyof MajlisData>('generalMeetingAttendance');
+
+  const loadData = async (month: Month) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetchSheetData(month);
+      if (result.length === 0) {
+        setError(`No data found for ${month}. Please ensure the sheet name is correct and contains data starting from row 2.`);
+      }
+      setData(result);
+
+      // Fetch previous month data for comparison
+      const monthIndex = MONTHS.indexOf(month);
+      if (monthIndex > 0) {
+        try {
+          const prevMonth = MONTHS[monthIndex - 1];
+          const prevResult = await fetchSheetData(prevMonth);
+          setPrevData(prevResult);
+        } catch (e) {
+          console.warn('Could not fetch previous month data for comparison', e);
+          setPrevData([]);
+        }
+      } else {
+        setPrevData([]);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to load data');
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData(selectedMonth);
+  }, [selectedMonth]);
+
+  const filteredData = useMemo(() => {
+    return data.filter(item => 
+      item.majlisName.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [data, searchTerm]);
+
+  const stats = useMemo(() => {
+    if (data.length === 0) return null;
+
+    const calculateTotals = (items: MajlisData[]) => {
+      const totals: Record<string, number> = {};
+      Object.keys(FIELD_LABELS).forEach(key => {
+        const firstVal = items[0]?.[key as keyof MajlisData];
+        if (typeof firstVal === 'number') {
+          totals[key] = items.reduce((acc, curr) => acc + (curr[key as keyof MajlisData] as number || 0), 0);
+        }
+      });
+      return totals;
+    };
+
+    const current = calculateTotals(data);
+    const previous = prevData.length > 0 ? calculateTotals(prevData) : null;
+
+    const getTrend = (currVal: number, prevVal: number | null) => {
+      if (prevVal === null) return null;
+      if (currVal > prevVal) return 'up';
+      if (currVal < prevVal) return 'down';
+      return 'stable';
+    };
+
+    const allStats: { id: string; label: string; value: number; trend: 'up' | 'down' | 'stable' | null }[] = Object.keys(current).map(key => ({
+      id: key,
+      label: FIELD_LABELS[key as keyof MajlisData],
+      value: current[key],
+      trend: getTrend(current[key], previous ? previous[key] : null)
+    }));
+
+    return allStats;
+  }, [data, prevData]);
+
+  const chartData = useMemo(() => {
+    return filteredData
+      .map(item => {
+        const val = item[selectedRatioField] as number || 0;
+        const ratio = item.tajnidMembers > 0 
+          ? (val / item.tajnidMembers) * 100 
+          : 0;
+        return {
+          name: item.majlisName,
+          ratio: parseFloat(ratio.toFixed(2)),
+          value: val,
+          tajnid: item.tajnidMembers,
+          label: FIELD_LABELS[selectedRatioField]
+        };
+      })
+      .sort((a, b) => b.ratio - a.ratio)
+      .slice(0, 10);
+  }, [filteredData, selectedRatioField]);
+
+  const ratioFields = useMemo(() => {
+    return Object.keys(FIELD_LABELS).filter(key => {
+      const k = key as keyof MajlisData;
+      return typeof data[0]?.[k] === 'number' && k !== 'tajnidMembers' && k !== 'sl';
+    }) as (keyof MajlisData)[];
+  }, [data]);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      {/* Sidebar */}
+      <aside className="fixed left-0 top-0 h-full w-64 bg-white border-r border-slate-200 z-50 hidden lg:block">
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+              <LayoutDashboard size={24} />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg leading-tight">Majlis Dash</h1>
+              <p className="text-xs text-slate-500 font-medium">Analysis 2026</p>
+            </div>
+          </div>
+
+          <nav className="space-y-1">
+            <button 
+              onClick={() => setView('dashboard')}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200",
+                view === 'dashboard' ? "bg-indigo-50 text-indigo-600 font-semibold" : "text-slate-500 hover:bg-slate-50"
+              )}
+            >
+              <BarChart3 size={20} />
+              Dashboard
+            </button>
+            <button 
+              onClick={() => setView('table')}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200",
+                view === 'table' ? "bg-indigo-50 text-indigo-600 font-semibold" : "text-slate-500 hover:bg-slate-50"
+              )}
+            >
+              <TableIcon size={20} />
+              Data Table
+            </button>
+          </nav>
+
+          <div className="mt-12">
+            <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-4">Select Month</p>
+            <div className="grid grid-cols-2 gap-2 px-2">
+              {MONTHS.map(m => (
+                <button
+                  key={m}
+                  onClick={() => setSelectedMonth(m)}
+                  className={cn(
+                    "px-2 py-2 rounded-lg text-xs font-medium transition-all",
+                    selectedMonth === m ? "bg-indigo-600 text-white shadow-md" : "bg-slate-50 text-slate-600 hover:bg-slate-100"
+                  )}
+                >
+                  {m.replace('26', '')}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="lg:ml-64 p-4 lg:p-8">
+        {/* Header */}
+        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">{selectedMonth} Performance</h2>
+            <p className="text-slate-500">Real-time analysis of Majlis activities</p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="text" 
+                placeholder="Search Majlis..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all w-full md:w-64"
+              />
+            </div>
+            <button 
+              onClick={() => loadData(selectedMonth)}
+              className="p-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 transition-all"
+            >
+              <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
+            </button>
+          </div>
+        </header>
+
+        {error && (
+          <div className="mb-8 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600">
+            <AlertCircle size={20} />
+            <p className="font-medium">{error}</p>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-8">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
+              <div key={i} className="h-28 bg-white rounded-2xl border border-slate-200 animate-pulse" />
+            ))}
+          </div>
+        ) : stats ? (
+          <div className="mb-8">
+            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 px-1">Summary Statistics (Total Counts)</h3>
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
+            >
+              {stats.map(({ id, label, value, trend }) => (
+                <StatCard 
+                  key={id}
+                  icon={getIconForField(id)} 
+                  label={label} 
+                  value={value} 
+                  trend={trend}
+                  color={getColorForField(id)} 
+                />
+              ))}
+            </motion.div>
+          </div>
+        ) : !error && (
+          <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center mb-8">
+            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Search className="text-slate-400" size={32} />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">No Data Found</h3>
+            <p className="text-slate-500">We couldn't find any records for {selectedMonth}. Check your Google Sheet tabs.</p>
+          </div>
+        )}
+
+        <AnimatePresence mode="wait">
+          {view === 'dashboard' ? (
+            <motion.div 
+              key="dashboard"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="space-y-8"
+            >
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Tajnid vs Ratio Chart */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                    <h3 className="text-lg font-bold flex items-center gap-2">
+                      <BarChart3 size={20} className="text-indigo-600" />
+                      Top 10 Majlis: Ratio (%)
+                    </h3>
+                    <select 
+                      value={selectedRatioField}
+                      onChange={(e) => setSelectedRatioField(e.target.value as keyof MajlisData)}
+                      className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    >
+                      {ratioFields.map(field => (
+                        <option key={field} value={field}>{FIELD_LABELS[field]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="h-[350px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} unit="%" />
+                        <Tooltip 
+                          formatter={(value: any, name: any, props: any) => [
+                            `${value}% (${props.payload.value} / ${props.payload.tajnid})`, 
+                            'Ratio'
+                          ]}
+                          contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Legend iconType="circle" />
+                        <Bar dataKey="ratio" name={`${FIELD_LABELS[selectedRatioField]} হার (%)`} fill="#6366f1" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="mt-4 text-xs text-slate-400 italic text-center">
+                    * Ratio = ({FIELD_LABELS[selectedRatioField]} / {FIELD_LABELS.tajnidMembers}) × 100
+                  </p>
+                </div>
+
+                {/* Value Distribution Chart */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
+                    <Activity size={20} className="text-emerald-600" />
+                    {FIELD_LABELS[selectedRatioField]} Distribution
+                  </h3>
+                  <div className="h-[350px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData}>
+                        <defs>
+                          <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="value" name={FIELD_LABELS[selectedRatioField]} stroke="#10b981" fillOpacity={1} fill="url(#colorValue)" strokeWidth={3} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary Table Preview */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                  <h3 className="text-lg font-bold">Top 10 Majlis by {FIELD_LABELS[selectedRatioField]} Ratio</h3>
+                  <button onClick={() => setView('table')} className="text-indigo-600 font-semibold text-sm hover:underline">View All</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                      <tr>
+                        <th className="px-6 py-4 font-bold">Majlis Name</th>
+                        <th className="px-6 py-4 font-bold">Tajnid</th>
+                        <th className="px-6 py-4 font-bold">{FIELD_LABELS[selectedRatioField]}</th>
+                        <th className="px-6 py-4 font-bold">Ratio (%)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {chartData.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-6 py-4 font-medium text-slate-900">{item.name}</td>
+                          <td className="px-6 py-4 text-slate-600">{item.tajnid}</td>
+                          <td className="px-6 py-4 text-slate-600">{item.value}</td>
+                          <td className="px-6 py-4">
+                            <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold">
+                              {item.ratio}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div 
+              key="table"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-lg font-bold">Full Data Table - {selectedMonth}</h3>
+                <div className="flex gap-2">
+                  <button className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all">
+                    <Download size={16} />
+                    Export CSV
+                  </button>
+                </div>
+              </div>
+              <div className="overflow-x-auto max-h-[600px]">
+                <table className="w-full text-left border-collapse">
+                  <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
+                    <tr>
+                      {Object.keys(FIELD_LABELS).map((key) => (
+                        <th key={key} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 whitespace-nowrap">
+                          {FIELD_LABELS[key as keyof MajlisData]}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredData.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50 transition-colors text-sm">
+                        {Object.keys(FIELD_LABELS).map((key) => (
+                          <td key={key} className="px-4 py-3 text-slate-600 border-b border-slate-50 whitespace-nowrap">
+                            {item[key as keyof MajlisData]}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+}
+
+function getIconForField(key: string) {
+  if (key.includes('tajnid')) return <Users size={18} />;
+  if (key.includes('Meeting')) return <Calendar size={18} />;
+  if (key.includes('Quran')) return <BookOpen size={18} />;
+  if (key.includes('tabligh') || key.includes('baiat')) return <MessageSquare size={18} />;
+  if (key.includes('sick') || key.includes('elderly')) return <Heart size={18} />;
+  return <Activity size={18} />;
+}
+
+function getColorForField(key: string) {
+  if (key.includes('tajnid')) return 'indigo';
+  if (key.includes('Attendance')) return 'emerald';
+  if (key.includes('Meeting')) return 'amber';
+  if (key.includes('Quran')) return 'violet';
+  if (key.includes('baiat')) return 'rose';
+  return 'slate';
+}
+
+const StatCard: React.FC<{ 
+  icon: React.ReactNode, 
+  label: string, 
+  value: number, 
+  trend?: 'up' | 'down' | 'stable' | null,
+  subValue?: string,
+  color: string 
+}> = ({ icon, label, value, trend, subValue, color }) => {
+  const colorClasses = {
+    indigo: "bg-indigo-50 text-indigo-600",
+    emerald: "bg-emerald-50 text-emerald-600",
+    amber: "bg-amber-50 text-amber-600",
+    rose: "bg-rose-50 text-rose-600",
+    violet: "bg-violet-50 text-violet-600",
+    slate: "bg-slate-50 text-slate-600",
+  }[color] || "bg-slate-50 text-slate-600";
+
+  return (
+    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all relative overflow-hidden group">
+      <div className="flex justify-between items-start mb-2">
+        <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center", colorClasses)}>
+          {icon}
+        </div>
+        {trend && (
+          <div className={cn(
+            "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase",
+            trend === 'up' ? "bg-emerald-50 text-emerald-600" : 
+            trend === 'down' ? "bg-rose-50 text-rose-600" : 
+            "bg-slate-50 text-slate-400"
+          )}>
+            {trend === 'up' && <TrendingUp size={10} />}
+            {trend === 'down' && <TrendingDown size={10} />}
+            {trend === 'stable' && <Minus size={10} />}
+            {trend}
+          </div>
+        )}
+      </div>
+      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 line-clamp-1" title={label}>{label}</p>
+      <div className="flex items-baseline gap-2">
+        <h4 className="text-lg font-bold text-slate-900">{value.toLocaleString()}</h4>
+        {subValue && <span className="text-[9px] font-medium text-slate-400">{subValue}</span>}
+      </div>
+      
+      {/* Decorative background element */}
+      <div className={cn(
+        "absolute -right-2 -bottom-2 w-12 h-12 opacity-[0.03] group-hover:scale-110 transition-transform duration-500",
+        colorClasses.split(' ')[1]
+      )}>
+        {icon}
+      </div>
+    </div>
+  );
+};
