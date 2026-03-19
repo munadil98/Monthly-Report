@@ -1,76 +1,81 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
 
-const __dirname = process.cwd();
+const app = express();
 
+// Helper to fetch data from Google Sheets
 async function fetchGoogleSheetsData(month: string) {
   const apiKey = process.env.GOOGLE_SHEETS_API_KEY;
   const sheetId = process.env.GOOGLE_SHEET_ID;
 
-  if (!apiKey) {
-    throw new Error("GOOGLE_SHEETS_API_KEY is not set on the server.");
-  }
-  if (!sheetId) {
-    throw new Error("GOOGLE_SHEET_ID is not set on the server.");
+  if (!apiKey || !sheetId) {
+    throw new Error("Missing GOOGLE_SHEETS_API_KEY or GOOGLE_SHEET_ID in environment variables.");
   }
 
-  const range = `${month}!A2:AK100`; // Adjust range as needed
+  const range = `${month}!A2:AK100`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
-  const response = await fetch(url);
   
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(`Google Sheets API error: ${error.error?.message || response.statusText}`);
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error?.message || `Google Sheets API returned ${response.status}`);
+    }
+    
+    return data.values || [];
+  } catch (err: any) {
+    console.error("[Sheets Error]", err.message);
+    throw err;
   }
-
-  const data = await response.json();
-  return data.values;
 }
 
-const app = express();
+// --- API ROUTES ---
 
-// API Routes - MUST be registered before static middleware
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    env: process.env.NODE_ENV,
+    isVercel: !!process.env.VERCEL 
+  });
+});
+
 app.get("/api/data", async (req, res) => {
-  console.log(`[API] GET /api/data - month: ${req.query.month}`);
+  const month = req.query.month as string || 'Jan26';
+  console.log(`[API] Requesting data for: ${month}`);
+  
   try {
-    const month = req.query.month as string || 'Jan26';
     const values = await fetchGoogleSheetsData(month);
-    console.log(`[API] Successfully fetched ${values?.length || 0} rows`);
     res.json(values);
   } catch (error: any) {
-    console.error("[API] Error fetching data:", error.message);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: "Failed to fetch data", 
+      details: error.message 
+    });
   }
 });
 
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", mode: process.env.NODE_ENV || "development" });
-});
+// --- SERVER LOGIC ---
 
 async function startServer() {
-  const PORT = 3000;
+  const isVercel = !!process.env.VERCEL;
+  const isProd = process.env.NODE_ENV === "production" || isVercel;
 
-  console.log("Starting server in", process.env.NODE_ENV || "development", "mode");
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
-    console.log("Initializing Vite in development mode...");
+  if (!isProd) {
+    // Only load Vite in local development
+    console.log("Starting in DEVELOPMENT mode...");
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "custom", // Use custom to handle index.html manually for better control
+      appType: "custom",
     });
     app.use(vite.middlewares);
-    
     app.use('*', async (req, res, next) => {
       if (req.originalUrl.startsWith('/api')) return next();
-      
-      const url = req.originalUrl;
       try {
         let template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
-        template = await vite.transformIndexHtml(url, template);
+        template = await vite.transformIndexHtml(req.originalUrl, template);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
       } catch (e: any) {
         vite.ssrFixStacktrace(e);
@@ -78,32 +83,42 @@ async function startServer() {
       }
     });
   } else {
+    // Production mode: Serve static files
+    console.log("Starting in PRODUCTION mode...");
     const distPath = path.join(process.cwd(), 'dist');
-    console.log(`Serving static files from: ${distPath}`);
     app.use(express.static(distPath));
     
-    // Catch-all route for SPA - but ignore /api routes
     app.get('*', (req, res, next) => {
-      if (req.path.startsWith('/api')) {
-        return next();
-      }
-      
+      if (req.path.startsWith('/api')) return next();
       const indexPath = path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
       } else {
-        res.status(404).send("Build artifacts not found. Please run 'npm run build' first.");
+        res.status(404).send("Frontend build not found. Please run 'npm run build'.");
       }
     });
   }
 
-  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://0.0.0.0:${PORT}`);
+  // Only start the listener if NOT on Vercel
+  if (!isVercel) {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => {
+      console.log(`Server running at http://localhost:${PORT}`);
     });
   }
 }
 
-startServer();
+// Global error handler to prevent "A server error occurred" HTML
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("[Global Error]", err);
+  res.status(500).json({ 
+    error: "Internal Server Error", 
+    message: err.message 
+  });
+});
+
+startServer().catch(err => {
+  console.error("Failed to start server:", err);
+});
 
 export default app;
