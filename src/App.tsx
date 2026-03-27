@@ -24,7 +24,7 @@ const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 export default function App() {
   const [selectedMonth, setSelectedMonth] = useState<Month>('Jan26');
   const [data, setData] = useState<MajlisData[]>([]);
-  const [prevData, setPrevData] = useState<MajlisData[]>([]);
+  const [allPrevMonthsData, setAllPrevMonthsData] = useState<MajlisData[][]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<'dashboard' | 'table'>('dashboard');
@@ -43,6 +43,7 @@ export default function App() {
     small: 15,
     medium: 40
   });
+  const [selectedSizeCategory, setSelectedSizeCategory] = useState<'small' | 'medium' | 'large'>('small');
 
   const loadData = async (month: Month) => {
     setLoading(true);
@@ -54,19 +55,22 @@ export default function App() {
       }
       setData(result);
 
-      // Fetch previous month data for comparison
+      // Fetch all previous months data for comparison starting from Jan26
       const monthIndex = MONTHS.indexOf(month);
-      if (monthIndex > 0) {
+      const prevMonths = MONTHS.slice(0, monthIndex);
+      
+      if (prevMonths.length > 0) {
         try {
-          const prevMonth = MONTHS[monthIndex - 1];
-          const prevResult = await fetchSheetData(prevMonth);
-          setPrevData(prevResult);
+          const results = await Promise.all(
+            prevMonths.map(m => fetchSheetData(m).catch(() => []))
+          );
+          setAllPrevMonthsData(results.filter(r => r.length > 0));
         } catch (e) {
-          console.warn('Could not fetch previous month data for comparison', e);
-          setPrevData([]);
+          console.warn('Could not fetch all previous months data', e);
+          setAllPrevMonthsData([]);
         }
       } else {
-        setPrevData([]);
+        setAllPrevMonthsData([]);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load data');
@@ -116,18 +120,33 @@ export default function App() {
     });
 
     const current = calculateTotals(validFilteredData);
-    const previous = prevData.length > 0 ? calculateTotals(prevData.filter(item => 
-      item.majlisName.toLowerCase().includes(searchTerm.toLowerCase())
-    ).filter(item => {
-      const val = item[selectedRatioField] as number || 0;
-      const ratio = item.tajnidMembers > 0 ? (val / item.tajnidMembers) * 100 : 0;
-      return ratio <= 100;
-    })) : null;
+    
+    // Calculate average of all previous months for trend comparison
+    const previousTotalsList = allPrevMonthsData.map(monthData => {
+      const filteredMonthData = monthData.filter(item => 
+        item.majlisName.toLowerCase().includes(searchTerm.toLowerCase())
+      ).filter(item => {
+        const val = item[selectedRatioField] as number || 0;
+        const ratio = item.tajnidMembers > 0 ? (val / item.tajnidMembers) * 100 : 0;
+        return ratio <= 100;
+      });
+      return calculateTotals(filteredMonthData);
+    });
 
-    const getTrend = (currVal: number, prevVal: number | null) => {
-      if (prevVal === null) return null;
-      if (currVal > prevVal) return 'up';
-      if (currVal < prevVal) return 'down';
+    const previousAverage: Record<string, number> = {};
+    if (previousTotalsList.length > 0) {
+      Object.keys(current).forEach(key => {
+        const sum = previousTotalsList.reduce((acc, curr) => acc + (curr[key] || 0), 0);
+        previousAverage[key] = sum / previousTotalsList.length;
+      });
+    }
+
+    const getTrend = (currVal: number, avgVal: number | null) => {
+      if (avgVal === null || avgVal === undefined) return null;
+      // Use a small threshold to avoid showing trend for tiny differences
+      const diff = currVal - avgVal;
+      if (diff > 0.01) return 'up';
+      if (diff < -0.01) return 'down';
       return 'stable';
     };
 
@@ -135,11 +154,11 @@ export default function App() {
       id: key,
       label: FIELD_LABELS[key as keyof MajlisData],
       value: current[key],
-      trend: getTrend(current[key], previous ? previous[key] : null)
+      trend: getTrend(current[key], previousTotalsList.length > 0 ? previousAverage[key] : null)
     }));
 
     return allStats;
-  }, [data, prevData]);
+  }, [data, allPrevMonthsData, searchTerm, selectedRatioField]);
 
   const chartData = useMemo(() => {
     return filteredData
@@ -388,29 +407,76 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               className="space-y-8"
             >
-                {/* Performance Ranking Charts by Size */}
+                {/* Performance Ranking Chart with Size Selector */}
                 <div className="grid grid-cols-1 gap-8">
-                  <PerformanceChart 
-                    title="Majlis Performance Ranking: Small (Ratio %)"
-                    data={chartData.filter(d => d.tajnid <= sizeThresholds.small)}
-                    selectedRatioField={selectedRatioField}
-                    ratioFields={ratioFields}
-                    onFieldChange={setSelectedRatioField}
-                  />
-                  <PerformanceChart 
-                    title="Majlis Performance Ranking: Medium (Ratio %)"
-                    data={chartData.filter(d => d.tajnid > sizeThresholds.small && d.tajnid <= sizeThresholds.medium)}
-                    selectedRatioField={selectedRatioField}
-                    ratioFields={ratioFields}
-                    onFieldChange={setSelectedRatioField}
-                  />
-                  <PerformanceChart 
-                    title="Majlis Performance Ranking: Large (Ratio %)"
-                    data={chartData.filter(d => d.tajnid > sizeThresholds.medium)}
-                    selectedRatioField={selectedRatioField}
-                    ratioFields={ratioFields}
-                    onFieldChange={setSelectedRatioField}
-                  />
+                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                      <div className="flex items-center gap-4">
+                        <h3 className="text-lg font-bold flex items-center gap-2">
+                          <BarChart3 size={20} className="text-indigo-600" />
+                          Majlis Performance Ranking
+                        </h3>
+                        <select 
+                          value={selectedSizeCategory}
+                          onChange={(e) => setSelectedSizeCategory(e.target.value as any)}
+                          className="text-xs font-bold bg-indigo-50 text-indigo-700 border-none rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
+                        >
+                          <option value="small">Small (Tajnid ≤ {sizeThresholds.small})</option>
+                          <option value="medium">Medium (Tajnid ≤ {sizeThresholds.medium})</option>
+                          <option value="large">Large (Tajnid &gt; {sizeThresholds.medium})</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Metric:</span>
+                        <select 
+                          value={selectedRatioField}
+                          onChange={(e) => setSelectedRatioField(e.target.value as keyof MajlisData)}
+                          className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        >
+                          {ratioFields.map(field => (
+                            <option key={field} value={field}>{FIELD_LABELS[field]}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="h-[450px]">
+                      {(() => {
+                        const filteredChartData = chartData.filter(d => {
+                          if (selectedSizeCategory === 'small') return d.tajnid <= sizeThresholds.small;
+                          if (selectedSizeCategory === 'medium') return d.tajnid > sizeThresholds.small && d.tajnid <= sizeThresholds.medium;
+                          if (selectedSizeCategory === 'large') return d.tajnid > sizeThresholds.medium;
+                          return true;
+                        });
+
+                        return filteredChartData.length > 0 ? (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={filteredChartData}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
+                              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} unit="%" />
+                              <Tooltip 
+                                formatter={(value: any, name: any, props: any) => [
+                                  `${value}% (${props.payload.value} / ${props.payload.tajnid})`, 
+                                  'Ratio'
+                                ]}
+                                contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                              />
+                              <Legend iconType="circle" />
+                              <Bar dataKey="ratio" name={`${FIELD_LABELS[selectedRatioField]} হার (%)`} fill="#6366f1" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                            <AlertCircle size={32} className="mb-2 opacity-20" />
+                            <p className="text-sm font-medium">No data for this category</p>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    <p className="mt-4 text-xs text-slate-400 italic text-center">
+                      * Ratio = ({FIELD_LABELS[selectedRatioField]} / {FIELD_LABELS.tajnidMembers}) × 100
+                    </p>
+                  </div>
                 </div>
 
               {/* Summary Table Preview */}
@@ -644,62 +710,6 @@ function getColorForField(key: string) {
   if (key.includes('baiat')) return 'rose';
   return 'slate';
 }
-
-const PerformanceChart: React.FC<{
-  title: string;
-  data: any[];
-  selectedRatioField: keyof MajlisData;
-  ratioFields: (keyof MajlisData)[];
-  onFieldChange: (field: keyof MajlisData) => void;
-}> = ({ title, data, selectedRatioField, ratioFields, onFieldChange }) => {
-  return (
-    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <h3 className="text-lg font-bold flex items-center gap-2">
-          <BarChart3 size={20} className="text-indigo-600" />
-          {title}
-        </h3>
-        <select 
-          value={selectedRatioField}
-          onChange={(e) => onFieldChange(e.target.value as keyof MajlisData)}
-          className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-        >
-          {ratioFields.map(field => (
-            <option key={field} value={field}>{FIELD_LABELS[field]}</option>
-          ))}
-        </select>
-      </div>
-      <div className="h-[350px]">
-        {data.length > 0 ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
-              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} unit="%" />
-              <Tooltip 
-                formatter={(value: any, name: any, props: any) => [
-                  `${value}% (${props.payload.value} / ${props.payload.tajnid})`, 
-                  'Ratio'
-                ]}
-                contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-              />
-              <Legend iconType="circle" />
-              <Bar dataKey="ratio" name={`${FIELD_LABELS[selectedRatioField]} হার (%)`} fill="#6366f1" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="h-full flex flex-col items-center justify-center text-slate-400">
-            <AlertCircle size={32} className="mb-2 opacity-20" />
-            <p className="text-sm font-medium">No data for this category</p>
-          </div>
-        )}
-      </div>
-      <p className="mt-4 text-xs text-slate-400 italic text-center">
-        * Ratio = ({FIELD_LABELS[selectedRatioField]} / {FIELD_LABELS.tajnidMembers}) × 100
-      </p>
-    </div>
-  );
-};
 
 const StatCard: React.FC<{ 
   icon: React.ReactNode, 

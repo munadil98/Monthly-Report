@@ -64,7 +64,7 @@ export const FIELD_LABELS: Record<keyof MajlisData, string> = {
   fiveTimePrayers: '5 ওয়াক্ত নামাযীর সংখা',
   congregationalPrayers: 'বাজামাত নামাযীর সংখ্যা',
   mtaConnection: 'এমটিএ সংযোগ',
-  apjMtaConnection: 'APj এমটিএ সংযোগ',
+  apjMtaConnection: 'অচল এমটিএ সংযোগ',
   regularMtaViewers: 'নিয়মিত এমটিএ দর্শক',
   regularKhutbaListeners: 'নিয়মিত খুদবা শ্রবণকারী',
   bookExam: 'পুস্তকের ওপর পরিক্ষা',
