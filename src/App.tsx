@@ -388,72 +388,30 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               className="space-y-8"
             >
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Tajnid vs Ratio Chart */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                    <h3 className="text-lg font-bold flex items-center gap-2">
-                      <BarChart3 size={20} className="text-indigo-600" />
-                      Majlis Performance Ranking: Ratio (%)
-                    </h3>
-                    <select 
-                      value={selectedRatioField}
-                      onChange={(e) => setSelectedRatioField(e.target.value as keyof MajlisData)}
-                      className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                    >
-                      {ratioFields.map(field => (
-                        <option key={field} value={field}>{FIELD_LABELS[field]}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="h-[350px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} unit="%" />
-                        <Tooltip 
-                          formatter={(value: any, name: any, props: any) => [
-                            `${value}% (${props.payload.value} / ${props.payload.tajnid})`, 
-                            'Ratio'
-                          ]}
-                          contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        />
-                        <Legend iconType="circle" />
-                        <Bar dataKey="ratio" name={`${FIELD_LABELS[selectedRatioField]} হার (%)`} fill="#6366f1" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <p className="mt-4 text-xs text-slate-400 italic text-center">
-                    * Ratio = ({FIELD_LABELS[selectedRatioField]} / {FIELD_LABELS.tajnidMembers}) × 100
-                  </p>
+                {/* Performance Ranking Charts by Size */}
+                <div className="grid grid-cols-1 gap-8">
+                  <PerformanceChart 
+                    title="Majlis Performance Ranking: Small (Ratio %)"
+                    data={chartData.filter(d => d.tajnid <= sizeThresholds.small)}
+                    selectedRatioField={selectedRatioField}
+                    ratioFields={ratioFields}
+                    onFieldChange={setSelectedRatioField}
+                  />
+                  <PerformanceChart 
+                    title="Majlis Performance Ranking: Medium (Ratio %)"
+                    data={chartData.filter(d => d.tajnid > sizeThresholds.small && d.tajnid <= sizeThresholds.medium)}
+                    selectedRatioField={selectedRatioField}
+                    ratioFields={ratioFields}
+                    onFieldChange={setSelectedRatioField}
+                  />
+                  <PerformanceChart 
+                    title="Majlis Performance Ranking: Large (Ratio %)"
+                    data={chartData.filter(d => d.tajnid > sizeThresholds.medium)}
+                    selectedRatioField={selectedRatioField}
+                    ratioFields={ratioFields}
+                    onFieldChange={setSelectedRatioField}
+                  />
                 </div>
-
-                {/* Value Distribution Chart */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                  <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
-                    <Activity size={20} className="text-emerald-600" />
-                    {FIELD_LABELS[selectedRatioField]} Distribution
-                  </h3>
-                  <div className="h-[350px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={chartData}>
-                        <defs>
-                          <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
-                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
-                        <Tooltip />
-                        <Area type="monotone" dataKey="value" name={FIELD_LABELS[selectedRatioField]} stroke="#10b981" fillOpacity={1} fill="url(#colorValue)" strokeWidth={3} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
 
               {/* Summary Table Preview */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -686,6 +644,62 @@ function getColorForField(key: string) {
   if (key.includes('baiat')) return 'rose';
   return 'slate';
 }
+
+const PerformanceChart: React.FC<{
+  title: string;
+  data: any[];
+  selectedRatioField: keyof MajlisData;
+  ratioFields: (keyof MajlisData)[];
+  onFieldChange: (field: keyof MajlisData) => void;
+}> = ({ title, data, selectedRatioField, ratioFields, onFieldChange }) => {
+  return (
+    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <h3 className="text-lg font-bold flex items-center gap-2">
+          <BarChart3 size={20} className="text-indigo-600" />
+          {title}
+        </h3>
+        <select 
+          value={selectedRatioField}
+          onChange={(e) => onFieldChange(e.target.value as keyof MajlisData)}
+          className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+        >
+          {ratioFields.map(field => (
+            <option key={field} value={field}>{FIELD_LABELS[field]}</option>
+          ))}
+        </select>
+      </div>
+      <div className="h-[350px]">
+        {data.length > 0 ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} unit="%" />
+              <Tooltip 
+                formatter={(value: any, name: any, props: any) => [
+                  `${value}% (${props.payload.value} / ${props.payload.tajnid})`, 
+                  'Ratio'
+                ]}
+                contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+              />
+              <Legend iconType="circle" />
+              <Bar dataKey="ratio" name={`${FIELD_LABELS[selectedRatioField]} হার (%)`} fill="#6366f1" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-slate-400">
+            <AlertCircle size={32} className="mb-2 opacity-20" />
+            <p className="text-sm font-medium">No data for this category</p>
+          </div>
+        )}
+      </div>
+      <p className="mt-4 text-xs text-slate-400 italic text-center">
+        * Ratio = ({FIELD_LABELS[selectedRatioField]} / {FIELD_LABELS.tajnidMembers}) × 100
+      </p>
+    </div>
+  );
+};
 
 const StatCard: React.FC<{ 
   icon: React.ReactNode, 
