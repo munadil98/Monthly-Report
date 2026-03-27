@@ -31,6 +31,18 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRatioField, setSelectedRatioField] = useState<keyof MajlisData>('generalMeetingAttendance');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [thresholds, setThresholds] = useState({
+    A: 80,
+    B: 70,
+    C: 60,
+    D: 50,
+    E: 40
+  });
+  const [sizeThresholds, setSizeThresholds] = useState({
+    small: 15,
+    medium: 40
+  });
 
   const loadData = async (month: Month) => {
     setLoading(true);
@@ -74,22 +86,43 @@ export default function App() {
     );
   }, [data, searchTerm]);
 
+  const [showAllStats, setShowAllStats] = useState(false);
+
   const stats = useMemo(() => {
     if (data.length === 0) return null;
 
     const calculateTotals = (items: MajlisData[]) => {
       const totals: Record<string, number> = {};
+      // Use data[0] to determine which fields are numeric
+      const referenceItem = data[0];
+      if (!referenceItem) return totals;
+
       Object.keys(FIELD_LABELS).forEach(key => {
-        const firstVal = items[0]?.[key as keyof MajlisData];
-        if (typeof firstVal === 'number') {
-          totals[key] = items.reduce((acc, curr) => acc + (curr[key as keyof MajlisData] as number || 0), 0);
+        const k = key as keyof MajlisData;
+        if (typeof referenceItem[k] === 'number') {
+          totals[key] = items.reduce((acc, curr) => acc + (curr[k] as number || 0), 0);
         }
       });
       return totals;
     };
 
-    const current = calculateTotals(data);
-    const previous = prevData.length > 0 ? calculateTotals(prevData) : null;
+    // Filter out invalid data (ratio > 100%) for the selected field if requested
+    // The user said "Top 10 Majls should discard when percantage is greater than 100 as this data is invalid"
+    // We apply this filtering to the statistics as well to ensure totals are accurate
+    const validFilteredData = filteredData.filter(item => {
+      const val = item[selectedRatioField] as number || 0;
+      const ratio = item.tajnidMembers > 0 ? (val / item.tajnidMembers) * 100 : 0;
+      return ratio <= 100;
+    });
+
+    const current = calculateTotals(validFilteredData);
+    const previous = prevData.length > 0 ? calculateTotals(prevData.filter(item => 
+      item.majlisName.toLowerCase().includes(searchTerm.toLowerCase())
+    ).filter(item => {
+      const val = item[selectedRatioField] as number || 0;
+      const ratio = item.tajnidMembers > 0 ? (val / item.tajnidMembers) * 100 : 0;
+      return ratio <= 100;
+    })) : null;
 
     const getTrend = (currVal: number, prevVal: number | null) => {
       if (prevVal === null) return null;
@@ -123,8 +156,8 @@ export default function App() {
           label: FIELD_LABELS[selectedRatioField]
         };
       })
-      .sort((a, b) => b.ratio - a.ratio)
-      .slice(0, 10);
+      .filter(item => item.ratio <= 100)
+      .sort((a, b) => b.ratio - a.ratio);
   }, [filteredData, selectedRatioField]);
 
   const ratioFields = useMemo(() => {
@@ -133,6 +166,24 @@ export default function App() {
       return typeof data[0]?.[k] === 'number' && k !== 'tajnidMembers' && k !== 'sl';
     }) as (keyof MajlisData)[];
   }, [data]);
+
+  const getPerformanceClass = (ratio: number, field: keyof MajlisData) => {
+    const nonPerformanceFields: (keyof MajlisData)[] = ['tajnidMembers', 'saffAwwal', 'saffDom', 'totalAmelaMembers'];
+    if (nonPerformanceFields.includes(field)) return null;
+
+    if (ratio >= thresholds.A) return { label: 'Class A', color: 'bg-emerald-100 text-emerald-700' };
+    if (ratio >= thresholds.B) return { label: 'Class B', color: 'bg-blue-100 text-blue-700' };
+    if (ratio >= thresholds.C) return { label: 'Class C', color: 'bg-indigo-100 text-indigo-700' };
+    if (ratio >= thresholds.D) return { label: 'Class D', color: 'bg-amber-100 text-amber-700' };
+    if (ratio >= thresholds.E) return { label: 'Class E', color: 'bg-orange-100 text-orange-700' };
+    return { label: 'Class F', color: 'bg-rose-100 text-rose-700' };
+  };
+
+  const getMajlisSize = (tajnid: number) => {
+    if (tajnid <= sizeThresholds.small) return { label: 'Small', color: 'bg-slate-100 text-slate-600' };
+    if (tajnid <= sizeThresholds.medium) return { label: 'Medium', color: 'bg-slate-200 text-slate-700' };
+    return { label: 'Large', color: 'bg-slate-300 text-slate-800' };
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -262,6 +313,12 @@ export default function App() {
               />
             </div>
             <button 
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 transition-all"
+            >
+              <Settings size={20} />
+            </button>
+            <button 
               onClick={() => loadData(selectedMonth)}
               className="p-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 transition-all"
             >
@@ -279,19 +336,28 @@ export default function App() {
 
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-8">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
+            {[1, 2, 3, 4, 5].map(i => (
               <div key={i} className="h-28 bg-white rounded-2xl border border-slate-200 animate-pulse" />
             ))}
           </div>
-        ) : stats ? (
+        ) : stats && stats.length > 0 ? (
           <div className="mb-8">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 px-1">Summary Statistics (Total Counts)</h3>
+            <div className="flex items-center justify-between mb-4 px-1">
+              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Summary Statistics (Total Counts)</h3>
+              <button 
+                onClick={() => setShowAllStats(!showAllStats)}
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition-colors"
+              >
+                {showAllStats ? 'Show Less' : `Show All (${stats.length})`}
+              </button>
+            </div>
             <motion.div 
+              layout
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
             >
-              {stats.map(({ id, label, value, trend }) => (
+              {(showAllStats ? stats : stats.slice(0, 5)).map(({ id, label, value, trend }) => (
                 <StatCard 
                   key={id}
                   icon={getIconForField(id)} 
@@ -328,7 +394,7 @@ export default function App() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                     <h3 className="text-lg font-bold flex items-center gap-2">
                       <BarChart3 size={20} className="text-indigo-600" />
-                      Top 10 Majlis: Ratio (%)
+                      Majlis Performance Ranking: Ratio (%)
                     </h3>
                     <select 
                       value={selectedRatioField}
@@ -392,32 +458,50 @@ export default function App() {
               {/* Summary Table Preview */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                  <h3 className="text-lg font-bold">Top 10 Majlis by {FIELD_LABELS[selectedRatioField]} Ratio</h3>
-                  <button onClick={() => setView('table')} className="text-indigo-600 font-semibold text-sm hover:underline">View All</button>
+                  <h3 className="text-lg font-bold">Majlis Performance Ranking by {FIELD_LABELS[selectedRatioField]} Ratio</h3>
+                  <button onClick={() => setView('table')} className="text-indigo-600 font-semibold text-sm hover:underline">View All Data</button>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto max-h-[500px]">
                   <table className="w-full text-left">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider sticky top-0 z-10">
                       <tr>
                         <th className="px-6 py-4 font-bold">Majlis Name</th>
+                        <th className="px-6 py-4 font-bold">Size</th>
                         <th className="px-6 py-4 font-bold">Tajnid</th>
                         <th className="px-6 py-4 font-bold">{FIELD_LABELS[selectedRatioField]}</th>
                         <th className="px-6 py-4 font-bold">Ratio (%)</th>
+                        <th className="px-6 py-4 font-bold">Performance</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {chartData.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-6 py-4 font-medium text-slate-900">{item.name}</td>
-                          <td className="px-6 py-4 text-slate-600">{item.tajnid}</td>
-                          <td className="px-6 py-4 text-slate-600">{item.value}</td>
-                          <td className="px-6 py-4">
-                            <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold">
-                              {item.ratio}%
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {chartData.map((item, idx) => {
+                        const size = getMajlisSize(item.tajnid);
+                        const perf = getPerformanceClass(item.ratio, selectedRatioField);
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-6 py-4 font-medium text-slate-900">{item.name}</td>
+                            <td className="px-6 py-4">
+                              <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase", size.color)}>
+                                {size.label}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-slate-600">{item.tajnid}</td>
+                            <td className="px-6 py-4 text-slate-600">{item.value}</td>
+                            <td className="px-6 py-4">
+                              <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold">
+                                {item.ratio}%
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              {perf && (
+                                <span className={cn("px-2 py-1 rounded-lg text-[10px] font-bold uppercase", perf.color)}>
+                                  {perf.label}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -465,6 +549,119 @@ export default function App() {
                 </table>
               </div>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Settings Modal */}
+        <AnimatePresence>
+          {isSettingsOpen && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsSettingsOpen(false)}
+                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="bg-white rounded-3xl shadow-2xl w-full max-w-lg relative z-10 overflow-hidden"
+              >
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-600">
+                      <Settings size={24} />
+                    </div>
+                    <h3 className="text-xl font-bold">Dashboard Settings</h3>
+                  </div>
+                  <button 
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <div className="p-6 space-y-8 max-h-[70vh] overflow-y-auto">
+                  {/* Size Thresholds */}
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Majlis Size Thresholds (Tajnid)</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-slate-600">Small (Up to)</label>
+                        <input 
+                          type="number" 
+                          value={sizeThresholds.small}
+                          onChange={(e) => setSizeThresholds({...sizeThresholds, small: parseInt(e.target.value)})}
+                          className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-slate-600">Medium (Up to)</label>
+                        <input 
+                          type="number" 
+                          value={sizeThresholds.medium}
+                          onChange={(e) => setSizeThresholds({...sizeThresholds, medium: parseInt(e.target.value)})}
+                          className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Performance Thresholds */}
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Performance Class Thresholds (%)</h4>
+                    <div className="space-y-4">
+                      {Object.entries(thresholds).map(([grade, value]) => (
+                        <div key={grade} className="flex items-center gap-4">
+                          <div className={cn(
+                            "w-10 h-10 rounded-xl flex items-center justify-center font-bold",
+                            grade === 'A' ? "bg-emerald-100 text-emerald-700" :
+                            grade === 'B' ? "bg-blue-100 text-blue-700" :
+                            grade === 'C' ? "bg-indigo-100 text-indigo-700" :
+                            grade === 'D' ? "bg-amber-100 text-amber-700" :
+                            "bg-orange-100 text-orange-700"
+                          )}>
+                            {grade}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex justify-between mb-1">
+                              <span className="text-xs font-medium text-slate-600">Class {grade} (Min %)</span>
+                              <span className="text-xs font-bold text-indigo-600">{value}%</span>
+                            </div>
+                            <input 
+                              type="range" 
+                              min="0" 
+                              max="100" 
+                              value={value}
+                              onChange={(e) => setThresholds({...thresholds, [grade]: parseInt(e.target.value)})}
+                              className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                    <p className="text-xs text-indigo-700 leading-relaxed">
+                      <strong>Note:</strong> Performance classes do not apply to Tajnid, Saff Awwal, Saff Dom, or Total Amela Members as these are demographic fields.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-6 border-t border-slate-100">
+                  <button 
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all"
+                  >
+                    Save & Close
+                  </button>
+                </div>
+              </motion.div>
+            </div>
           )}
         </AnimatePresence>
       </main>
