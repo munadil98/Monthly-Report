@@ -113,6 +113,12 @@ export interface MajlisNameMap {
   bangla: string;
   english: string;
   whatsappNumber?: string;
+  district?: string;
+  districtNazimName?: string;
+  districtNazimMobile?: string;
+  region?: string;
+  regionNazimName?: string;
+  regionNazimMobile?: string;
 }
 
 export async function fetchMajlisNames(): Promise<MajlisNameMap[]> {
@@ -128,13 +134,19 @@ export async function fetchMajlisNames(): Promise<MajlisNameMap[]> {
     const rows = await response.json();
     
     // Filter out empty rows and return the mapping
-    // Assuming Column A: SL, Column B: Bangla, Column C: English, Column D: WhatsApp Number
+    // Column A: SL, B: Bangla, C: English, D: WhatsApp, E: District, F: Dist Nazim, G: Dist Mobile, H: Region, I: Reg Nazim, J: Reg Mobile
     return rows
       .filter((row: any[]) => row[1] && row[1].trim() !== '' && row[2] && row[2].trim() !== '')
       .map((row: any[]) => ({
         bangla: row[1].trim(),
         english: row[2].trim(),
-        whatsappNumber: row[3] ? row[3].trim() : undefined
+        whatsappNumber: row[3] ? row[3].trim() : undefined,
+        district: row[4] ? row[4].trim() : undefined,
+        districtNazimName: row[5] ? row[5].trim() : undefined,
+        districtNazimMobile: row[6] ? row[6].trim() : undefined,
+        region: row[7] ? row[7].trim() : undefined,
+        regionNazimName: row[8] ? row[8].trim() : undefined,
+        regionNazimMobile: row[9] ? row[9].trim() : undefined
       }));
   } catch (error) {
     console.error('Error fetching majlis names:', error);

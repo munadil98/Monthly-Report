@@ -111,7 +111,7 @@ app.get("/api/majlis-names", async (req, res) => {
   console.log(`[API] Requesting majlis names data`);
   
   try {
-    const range = `'Majlis-Names'!A2:D1000`;
+    const range = `'Majlis-Names'!A2:J1000`;
     const values = await fetchGoogleSheetsData(range);
     res.json(values);
   } catch (error: any) {
