@@ -5,9 +5,9 @@ import fs from "fs";
 const app = express();
 
 // Helper to fetch data from Google Sheets
-async function fetchGoogleSheetsData(range: string) {
+async function fetchGoogleSheetsData(range: string, overrideSheetId?: string) {
   const apiKey = process.env.GOOGLE_SHEETS_API_KEY;
-  const sheetId = process.env.GOOGLE_SHEET_ID;
+  const sheetId = overrideSheetId || process.env.GOOGLE_SHEET_ID;
 
   if (!apiKey || !sheetId) {
     throw new Error("Missing GOOGLE_SHEETS_API_KEY or GOOGLE_SHEET_ID in environment variables.");
@@ -32,11 +32,46 @@ async function fetchGoogleSheetsData(range: string) {
 
 // --- API ROUTES ---
 
+app.get("/api/sheets", async (req, res) => {
+  const apiKey = process.env.GOOGLE_SHEETS_API_KEY;
+  const zaimId = process.env.ZAIM_SHEET_ID;
+  const mainId = process.env.GOOGLE_SHEET_ID;
+  const sheetId = req.query.type === 'zaim' ? zaimId : mainId;
+
+  if (!apiKey || !sheetId) {
+    return res.status(500).json({ error: "Missing API Key or Sheet ID" });
+  }
+
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?key=${apiKey}`;
+  
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.error?.message || `Google Sheets API returned ${response.status}`);
+    }
+    
+    const sheetNames = data.sheets.map((s: any) => s.properties.title);
+    res.json({
+      id: sheetId,
+      type: req.query.type || 'main',
+      sheets: sheetNames
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/health", (req, res) => {
+  const sheetId = process.env.GOOGLE_SHEET_ID || "";
+  const zaimId = process.env.ZAIM_SHEET_ID || "";
   res.json({ 
     status: "ok", 
     env: process.env.NODE_ENV,
-    isVercel: !!process.env.VERCEL 
+    mainSheetId: sheetId ? `${sheetId.substring(0, 5)}...` : "not set",
+    zaimSheetId: zaimId ? `${zaimId.substring(0, 5)}...` : "not set",
+    hasApiKey: !!process.env.GOOGLE_SHEETS_API_KEY
   });
 });
 
@@ -60,8 +95,9 @@ app.get("/api/zaim", async (req, res) => {
   console.log(`[API] Requesting zaim data`);
   
   try {
-    const range = `Zaim!A2:I1000`;
-    const values = await fetchGoogleSheetsData(range);
+    const range = `'Zaim'!A2:I1000`;
+    const zaimSheetId = process.env.ZAIM_SHEET_ID;
+    const values = await fetchGoogleSheetsData(range, zaimSheetId);
     res.json(values);
   } catch (error: any) {
     res.status(500).json({ 

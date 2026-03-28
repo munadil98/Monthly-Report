@@ -28,6 +28,7 @@ export default function App() {
   });
   const [data, setData] = useState<MajlisData[]>([]);
   const [zaimData, setZaimData] = useState<ZaimData[]>([]);
+  const [zaimError, setZaimError] = useState<string | null>(null);
   const [masterMajlisNames, setMasterMajlisNames] = useState<string[]>([]);
   const [allPrevMonthsData, setAllPrevMonthsData] = useState<MajlisData[][]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,11 +103,13 @@ export default function App() {
   const loadData = async (month: Month) => {
     setLoading(true);
     setError(null);
+    setZaimError(null);
     try {
       const [result, zaimResult, masterNames] = await Promise.all([
         fetchSheetData(month),
         fetchZaimData().catch(err => {
           console.error('Failed to fetch Zaim data:', err);
+          setZaimError(err.message || 'Unknown error');
           return [];
         }),
         fetchMajlisNames().catch(() => [])
@@ -801,7 +804,12 @@ export default function App() {
                       </div>
                       <p className="text-[10px] text-slate-500 leading-relaxed">
                         WhatsApp buttons require data from the <strong>"Zaim"</strong> sheet to function. 
-                        {zaimData.length === 0 && " Please ensure the sheet name is exactly 'Zaim' and contains data."}
+                        {zaimData.length === 0 && !zaimError && " Please ensure the sheet name is exactly 'Zaim' and contains data."}
+                        {zaimError && (
+                          <span className="block mt-1 text-rose-500 font-medium">
+                            Error: {zaimError}
+                          </span>
+                        )}
                       </p>
                     </div>
 
