@@ -11,7 +11,7 @@ import {
   Menu, X
 } from 'lucide-react';
 import { MajlisData, Month, MONTHS, FIELD_LABELS, ZaimData } from './types';
-import { fetchSheetData, fetchZaimData, fetchMajlisNames } from './services/googleSheets';
+import { fetchSheetData, fetchZaimData, fetchMajlisNames, MajlisNameMap } from './services/googleSheets';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -30,7 +30,7 @@ export default function App() {
   const [zaimData, setZaimData] = useState<ZaimData[]>([]);
   const [zaimError, setZaimError] = useState<string | null>(null);
   const [showZaimDebug, setShowZaimDebug] = useState(false);
-  const [masterMajlisNames, setMasterMajlisNames] = useState<string[]>([]);
+  const [masterMajlisNames, setMasterMajlisNames] = useState<MajlisNameMap[]>([]);
   const [allPrevMonthsData, setAllPrevMonthsData] = useState<MajlisData[][]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -178,34 +178,59 @@ export default function App() {
     return name.toLowerCase().replace(/[^a-z0-9\u0980-\u09FF]/g, '').trim();
   };
 
+  const findZaimInfo = (majlisName: string) => {
+    const normalizedTarget = normalizeName(majlisName);
+    
+    // 1. Find the mapping to get both Bangla and English versions
+    const mapping = masterMajlisNames.find(m => 
+      normalizeName(m.bangla) === normalizedTarget || 
+      normalizeName(m.english) === normalizedTarget
+    );
+    
+    const targetBangla = mapping ? normalizeName(mapping.bangla) : normalizedTarget;
+    const targetEnglish = mapping ? normalizeName(mapping.english) : normalizedTarget;
+
+    console.log(`[Zaim Match] Target: "${majlisName}" (B: ${targetBangla}, E: ${targetEnglish})`);
+
+    // 2. Try exact match against both versions
+    let info = zaimData.find(z => {
+      const zNorm = normalizeName(z.majlis);
+      return zNorm === targetBangla || zNorm === targetEnglish;
+    });
+    if (info) return info;
+    
+    // 3. Try fuzzy match (contains) against both versions
+    info = zaimData.find(z => {
+      const zNorm = normalizeName(z.majlis);
+      return zNorm.includes(targetBangla) || targetBangla.includes(zNorm) ||
+             zNorm.includes(targetEnglish) || targetEnglish.includes(zNorm);
+    });
+    if (info) return info;
+
+    // 4. Try word-based match
+    const targetParts = majlisName.toLowerCase().split(/[\s\.]+/).filter(p => p.length > 2);
+    if (targetParts.length > 0) {
+      info = zaimData.find(z => {
+        const zParts = z.majlis.toLowerCase().split(/[\s\.]+/);
+        return targetParts.every(tp => zParts.some(zp => zp.includes(tp) || tp.includes(zp)));
+      });
+    }
+    
+    return info;
+  };
+
   const sendWhatsAppReport = (majlisName: string, recipientType: 'zaim' | 'district' | 'region') => {
     console.log(`Attempting to send report for: ${majlisName} to ${recipientType}`);
     
+    const zaimInfo = findZaimInfo(majlisName);
     const normalizedTarget = normalizeName(majlisName);
-    
-    // 1. Try exact match
-    let zaimInfo = zaimData.find(z => normalizeName(z.majlis) === normalizedTarget);
-    
-    // 2. Try fuzzy match (contains)
-    if (!zaimInfo) {
-      zaimInfo = zaimData.find(z => {
-        const norm = normalizeName(z.majlis);
-        return norm.includes(normalizedTarget) || normalizedTarget.includes(norm);
-      });
-    }
-
-    // 3. Try word-based match (for cases like "Khudra B.Baria" vs "B.Baria Khudra")
-    if (!zaimInfo) {
-      const targetWords = normalizedTarget.split(''); // This is too granular, let's use a better approach
-      // Actually, let's just look for any overlap in words if we split by common separators
-      const targetParts = majlisName.toLowerCase().split(/[\s\.]+/).filter(p => p.length > 2);
-      zaimInfo = zaimData.find(z => {
-        const zParts = z.majlis.toLowerCase().split(/[\s\.]+/);
-        return targetParts.some(tp => zParts.includes(tp));
-      });
-    }
-    
     const majlis = data.find(m => normalizeName(m.majlisName) === normalizedTarget);
+
+    // Get mapping for this majlis to check for direct WhatsApp number
+    const mapping = masterMajlisNames.find(m => 
+      normalizeName(m.bangla) === normalizedTarget || 
+      normalizeName(m.english) === normalizedTarget
+    );
 
     if (!majlis) {
       alert(`Data for Majlis "${majlisName}" not found in the current month's report.`);
@@ -216,7 +241,12 @@ export default function App() {
     let recipientName = '';
     let roleTitle = '';
     
-    if (zaimInfo) {
+    // Prioritize mapping's whatsappNumber for Zaim
+    if (recipientType === 'zaim' && mapping?.whatsappNumber) {
+      phone = mapping.whatsappNumber;
+      recipientName = zaimInfo?.zaimName || 'Zaim';
+      roleTitle = 'Zaim';
+    } else if (zaimInfo) {
       if (recipientType === 'zaim') {
         phone = zaimInfo.zaimMobile;
         recipientName = zaimInfo.zaimName;
@@ -233,11 +263,19 @@ export default function App() {
     }
 
     if (!phone) {
+      const mapping = masterMajlisNames.find(m => 
+        normalizeName(m.bangla) === normalizedTarget || 
+        normalizeName(m.english) === normalizedTarget
+      );
+      const targetBangla = mapping ? normalizeName(mapping.bangla) : normalizedTarget;
+      const targetEnglish = mapping ? normalizeName(mapping.english) : normalizedTarget;
+
       const closestMatches = zaimData
         .map(z => z.majlis)
         .filter(name => {
           const norm = normalizeName(name);
-          return norm.includes(normalizedTarget) || normalizedTarget.includes(norm);
+          return norm.includes(targetBangla) || targetBangla.includes(norm) ||
+                 norm.includes(targetEnglish) || targetEnglish.includes(norm);
         })
         .slice(0, 3);
 
@@ -383,7 +421,8 @@ export default function App() {
     );
 
     return masterMajlisNames
-      .map(name => {
+      .map(mapping => {
+        const name = mapping.bangla;
         const normalized = normalizeName(name);
         const submission = submittedDataMap.get(normalized);
         // A report is missing if it's not in the sheet OR if Tajnid is 0
@@ -400,32 +439,50 @@ export default function App() {
   }, [masterMajlisNames, data, searchTerm]);
 
   const sendReminder = (majlisName: string) => {
+    const zaimInfo = findZaimInfo(majlisName);
     const normalizedTarget = normalizeName(majlisName);
-    let zaimInfo = zaimData.find(z => normalizeName(z.majlis) === normalizedTarget);
-    
-    if (!zaimInfo) {
-      zaimInfo = zaimData.find(z => 
-        normalizeName(z.majlis).includes(normalizedTarget) || 
-        normalizedTarget.includes(normalizeName(z.majlis))
-      );
-    }
 
-    if (!zaimInfo || !zaimInfo.zaimMobile) {
-      alert(`Contact info for Zaim of ${majlisName} not found.`);
+    // Get mapping for this majlis to check for direct WhatsApp number
+    const mapping = masterMajlisNames.find(m => 
+      normalizeName(m.bangla) === normalizedTarget || 
+      normalizeName(m.english) === normalizedTarget
+    );
+
+    // Prioritize mapping's whatsappNumber
+    let phone = mapping?.whatsappNumber || zaimInfo?.zaimMobile;
+
+    if (!phone) {
+      const targetBangla = mapping ? normalizeName(mapping.bangla) : normalizedTarget;
+      const targetEnglish = mapping ? normalizeName(mapping.english) : normalizedTarget;
+
+      const closestMatches = zaimData
+        .map(z => z.majlis)
+        .filter(name => {
+          const norm = normalizeName(name);
+          return norm.includes(targetBangla) || targetBangla.includes(norm) ||
+                 norm.includes(targetEnglish) || targetEnglish.includes(norm);
+        })
+        .slice(0, 3);
+
+      const matchMsg = closestMatches.length > 0 
+        ? `\n\nClosest matches found in Zaim sheet: ${closestMatches.join(', ')}`
+        : `\n\nNo similar names found in the Zaim sheet. Please ensure "${majlisName}" exists in the "Zaim" sheet.`;
+
+      alert(`Contact info for Zaim of "${majlisName}" not found.${matchMsg}`);
       return;
     }
 
-    let phone = zaimInfo.zaimMobile.replace(/\D/g, '');
-    if (phone.startsWith('0') && phone.length === 11) {
-      phone = '88' + phone;
+    let formattedPhone = phone.replace(/\D/g, '');
+    if (formattedPhone.startsWith('0') && formattedPhone.length === 11) {
+      formattedPhone = '88' + formattedPhone;
     }
 
     const message = `*Reminder: Monthly Report - ${selectedMonth}*\n` +
-      `Assalamu Alaikum ${zaimInfo.zaimName},\n` +
+      `Assalamu Alaikum ${zaimInfo?.zaimName || 'Zaim'},\n` +
       `The monthly report for Majlis *${majlisName}* has not been received yet (Tajnid data is missing).\n\n` +
       `Please submit the report as soon as possible. Jazakallah.`;
 
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+    window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const chartData = useMemo(() => {

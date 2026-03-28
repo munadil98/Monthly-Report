@@ -109,7 +109,13 @@ export async function fetchZaimData(): Promise<ZaimData[]> {
   }
 }
 
-export async function fetchMajlisNames(): Promise<string[]> {
+export interface MajlisNameMap {
+  bangla: string;
+  english: string;
+  whatsappNumber?: string;
+}
+
+export async function fetchMajlisNames(): Promise<MajlisNameMap[]> {
   const url = `/api/majlis-names`;
 
   try {
@@ -121,15 +127,15 @@ export async function fetchMajlisNames(): Promise<string[]> {
 
     const rows = await response.json();
     
-    // Filter out empty rows and return the names
-    // Check both column A and B for a name
+    // Filter out empty rows and return the mapping
+    // Assuming Column A: SL, Column B: Bangla, Column C: English, Column D: WhatsApp Number
     return rows
-      .filter((row: any[]) => (row[0] && row[0].trim() !== '') || (row[1] && row[1].trim() !== ''))
-      .map((row: any[]) => {
-        const isFirstColSL = row[0] && !isNaN(Number(row[0]));
-        return isFirstColSL ? (row[1] || '').trim() : (row[0] || '').trim();
-      })
-      .filter((name: string) => name !== '');
+      .filter((row: any[]) => row[1] && row[1].trim() !== '' && row[2] && row[2].trim() !== '')
+      .map((row: any[]) => ({
+        bangla: row[1].trim(),
+        english: row[2].trim(),
+        whatsappNumber: row[3] ? row[3].trim() : undefined
+      }));
   } catch (error) {
     console.error('Error fetching majlis names:', error);
     throw error;
