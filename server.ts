@@ -92,17 +92,17 @@ app.get("/api/data", async (req, res) => {
 });
 
 app.get("/api/zaim", async (req, res) => {
-  console.log(`[API] Requesting zaim data`);
+  const zaimSheetId = process.env.ZAIM_SHEET_ID || process.env.GOOGLE_SHEET_ID;
+  console.log(`[API] Requesting zaim data from: ${zaimSheetId}`);
   
   try {
     const range = `'Zaim'!A2:I1000`;
-    const zaimSheetId = process.env.ZAIM_SHEET_ID;
     const values = await fetchGoogleSheetsData(range, zaimSheetId);
     res.json(values);
   } catch (error: any) {
     res.status(500).json({ 
       error: "Failed to fetch zaim data", 
-      details: error.message 
+      details: `${error.message} (ID: ${zaimSheetId ? zaimSheetId.substring(0, 5) + '...' : 'none'})` 
     });
   }
 });

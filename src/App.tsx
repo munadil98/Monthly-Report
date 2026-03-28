@@ -29,6 +29,7 @@ export default function App() {
   const [data, setData] = useState<MajlisData[]>([]);
   const [zaimData, setZaimData] = useState<ZaimData[]>([]);
   const [zaimError, setZaimError] = useState<string | null>(null);
+  const [showZaimDebug, setShowZaimDebug] = useState(false);
   const [masterMajlisNames, setMasterMajlisNames] = useState<string[]>([]);
   const [allPrevMonthsData, setAllPrevMonthsData] = useState<MajlisData[][]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,6 +116,8 @@ export default function App() {
         fetchMajlisNames().catch(() => [])
       ]);
 
+      console.log(`Loaded ${zaimResult.length} Zaim records. First few:`, zaimResult.slice(0, 3));
+
       if (result.length === 0) {
         setError(`No data found for ${month}. Please ensure the sheet name is correct and contains data starting from row 2.`);
       }
@@ -179,23 +182,33 @@ export default function App() {
     console.log(`Attempting to send report for: ${majlisName} to ${recipientType}`);
     
     const normalizedTarget = normalizeName(majlisName);
-    const majlis = data.find(m => normalizeName(m.majlisName) === normalizedTarget);
+    
+    // 1. Try exact match
     let zaimInfo = zaimData.find(z => normalizeName(z.majlis) === normalizedTarget);
     
+    // 2. Try fuzzy match (contains)
     if (!zaimInfo) {
-      console.warn(`No exact match found for Majlis: "${majlisName}" (Normalized: "${normalizedTarget}")`);
-      // Try fuzzy match
-      zaimInfo = zaimData.find(z => 
-        normalizeName(z.majlis).includes(normalizedTarget) || 
-        normalizedTarget.includes(normalizeName(z.majlis))
-      );
-      if (zaimInfo) {
-        console.log(`Found fuzzy match: "${zaimInfo.majlis}" for "${majlisName}"`);
-      }
+      zaimInfo = zaimData.find(z => {
+        const norm = normalizeName(z.majlis);
+        return norm.includes(normalizedTarget) || normalizedTarget.includes(norm);
+      });
     }
 
+    // 3. Try word-based match (for cases like "Khudra B.Baria" vs "B.Baria Khudra")
+    if (!zaimInfo) {
+      const targetWords = normalizedTarget.split(''); // This is too granular, let's use a better approach
+      // Actually, let's just look for any overlap in words if we split by common separators
+      const targetParts = majlisName.toLowerCase().split(/[\s\.]+/).filter(p => p.length > 2);
+      zaimInfo = zaimData.find(z => {
+        const zParts = z.majlis.toLowerCase().split(/[\s\.]+/);
+        return targetParts.some(tp => zParts.includes(tp));
+      });
+    }
+    
+    const majlis = data.find(m => normalizeName(m.majlisName) === normalizedTarget);
+
     if (!majlis) {
-      console.error(`Majlis data not found for: ${majlisName}`);
+      alert(`Data for Majlis "${majlisName}" not found in the current month's report.`);
       return;
     }
 
@@ -220,7 +233,19 @@ export default function App() {
     }
 
     if (!phone) {
-      alert(`Phone number for ${roleTitle || recipientType} not found for ${majlisName}. Please check the "Zaim" sheet.`);
+      const closestMatches = zaimData
+        .map(z => z.majlis)
+        .filter(name => {
+          const norm = normalizeName(name);
+          return norm.includes(normalizedTarget) || normalizedTarget.includes(norm);
+        })
+        .slice(0, 3);
+
+      const matchMsg = closestMatches.length > 0 
+        ? `\n\nClosest matches found in Zaim sheet: ${closestMatches.join(', ')}`
+        : `\n\nNo similar names found in the Zaim sheet. Please ensure "${majlisName}" exists in the "Zaim" sheet.`;
+
+      alert(`Phone number for ${roleTitle || recipientType} not found for "${majlisName}".${matchMsg}`);
       return;
     }
 
@@ -795,12 +820,22 @@ export default function App() {
                           <Users size={16} className="text-indigo-500" />
                           Contact Data
                         </h3>
-                        <span className={cn(
-                          "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase",
-                          zaimData.length > 0 ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"
-                        )}>
-                          {zaimData.length > 0 ? `${zaimData.length} Loaded` : 'Not Loaded'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {zaimData.length > 0 && (
+                            <button 
+                              onClick={() => setShowZaimDebug(!showZaimDebug)}
+                              className="text-[10px] text-indigo-600 hover:underline font-bold uppercase"
+                            >
+                              {showZaimDebug ? 'Hide' : 'View'}
+                            </button>
+                          )}
+                          <span className={cn(
+                            "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase",
+                            zaimData.length > 0 ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"
+                          )}>
+                            {zaimData.length > 0 ? `${zaimData.length} Loaded` : 'Not Loaded'}
+                          </span>
+                        </div>
                       </div>
                       <p className="text-[10px] text-slate-500 leading-relaxed">
                         WhatsApp buttons require data from the <strong>"Zaim"</strong> sheet to function. 
@@ -811,6 +846,21 @@ export default function App() {
                           </span>
                         )}
                       </p>
+
+                      {showZaimDebug && zaimData.length > 0 && (
+                        <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100 max-h-48 overflow-y-auto">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Loaded Majlis Names:</p>
+                          <div className="grid grid-cols-1 gap-1">
+                            {zaimData.slice(0, 50).map((z, i) => (
+                              <div key={i} className="text-[10px] text-slate-600 flex justify-between border-b border-slate-100 pb-1">
+                                <span>{z.majlis}</span>
+                                <span className="text-slate-400">{z.zaimMobile ? '✓' : '✗'}</span>
+                              </div>
+                            ))}
+                            {zaimData.length > 50 && <p className="text-[10px] text-slate-400 mt-1">...and {zaimData.length - 50} more</p>}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Missing Reports */}
