@@ -38,6 +38,18 @@ export interface MajlisData {
   regularExercise: number;
 }
 
+export interface ZaimData {
+  sl: string;
+  majlis: string;
+  zaimName: string;
+  zaimMobile: string;
+  district: string;
+  districtNazimName: string;
+  districtNazimMobile: string;
+  regionNazimName: string;
+  regionNazimMobile: string;
+}
+
 export type Month = 'Jan26' | 'Feb26' | 'Mar26' | 'Apr26' | 'May26' | 'Jun26' | 'Jul26' | 'Aug26' | 'Sep26' | 'Oct26' | 'Nov26' | 'Dec26';
 
 export const MONTHS: Month[] = ['Jan26', 'Feb26', 'Mar26', 'Apr26', 'May26', 'Jun26', 'Jul26', 'Aug26', 'Sep26', 'Oct26', 'Nov26', 'Dec26'];

@@ -10,8 +10,8 @@ import {
   Users, BookOpen, Heart, Activity, Calendar, TrendingUp, TrendingDown, Minus, MessageSquare,
   Menu, X
 } from 'lucide-react';
-import { MajlisData, Month, MONTHS, FIELD_LABELS } from './types';
-import { fetchSheetData } from './services/googleSheets';
+import { MajlisData, Month, MONTHS, FIELD_LABELS, ZaimData } from './types';
+import { fetchSheetData, fetchZaimData, fetchMajlisNames } from './services/googleSheets';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -22,38 +22,102 @@ function cn(...inputs: ClassValue[]) {
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
 export default function App() {
-  const [selectedMonth, setSelectedMonth] = useState<Month>('Jan26');
+  const [selectedMonth, setSelectedMonth] = useState<Month>(() => {
+    const saved = localStorage.getItem('selectedMonth');
+    return (saved as Month) || 'Jan26';
+  });
   const [data, setData] = useState<MajlisData[]>([]);
+  const [zaimData, setZaimData] = useState<ZaimData[]>([]);
+  const [masterMajlisNames, setMasterMajlisNames] = useState<string[]>([]);
   const [allPrevMonthsData, setAllPrevMonthsData] = useState<MajlisData[][]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'dashboard' | 'table'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'table'>(() => {
+    return (localStorage.getItem('view') as 'dashboard' | 'table') || 'dashboard';
+  });
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedRatioField, setSelectedRatioField] = useState<keyof MajlisData>('generalMeetingAttendance');
+  const [selectedRatioField, setSelectedRatioField] = useState<keyof MajlisData>(() => {
+    return (localStorage.getItem('selectedRatioField') as keyof MajlisData) || 'generalMeetingAttendance';
+  });
+  const [selectedGrade, setSelectedGrade] = useState<string | 'all'>('all');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [thresholds, setThresholds] = useState({
-    A: 80,
-    B: 70,
-    C: 60,
-    D: 50,
-    E: 40
+  const [thresholds, setThresholds] = useState(() => {
+    const saved = localStorage.getItem('thresholds');
+    return saved ? JSON.parse(saved) : {
+      A: 80,
+      B: 70,
+      C: 60,
+      D: 50,
+      E: 40
+    };
   });
   const [sizeThresholds, setSizeThresholds] = useState({
     small: 15,
     medium: 40
   });
-  const [selectedSizeCategory, setSelectedSizeCategory] = useState<'small' | 'medium' | 'large'>('small');
+  const [selectedSizeCategory, setSelectedSizeCategory] = useState<'small' | 'medium' | 'large'>(() => {
+    return (localStorage.getItem('selectedSizeCategory') as any) || 'small';
+  });
+
+  const getPerformanceClass = (ratio: number, field: keyof MajlisData) => {
+    const nonPerformanceFields: (keyof MajlisData)[] = ['tajnidMembers', 'saffAwwal', 'saffDom', 'totalAmelaMembers'];
+    if (nonPerformanceFields.includes(field)) return null;
+
+    if (ratio >= thresholds.A) return { label: 'Class A', color: 'bg-emerald-100 text-emerald-700' };
+    if (ratio >= thresholds.B) return { label: 'Class B', color: 'bg-blue-100 text-blue-700' };
+    if (ratio >= thresholds.C) return { label: 'Class C', color: 'bg-indigo-100 text-indigo-700' };
+    if (ratio >= thresholds.D) return { label: 'Class D', color: 'bg-amber-100 text-amber-700' };
+    if (ratio >= thresholds.E) return { label: 'Class E', color: 'bg-orange-100 text-orange-700' };
+    return { label: 'Class F', color: 'bg-rose-100 text-rose-700' };
+  };
+
+  const gradeCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: data.length, A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
+    data.forEach(item => {
+      const val = item[selectedRatioField] as number || 0;
+      const ratio = item.tajnidMembers > 0 ? (val / item.tajnidMembers) * 100 : 0;
+      const perf = getPerformanceClass(ratio, selectedRatioField);
+      if (perf) {
+        const gradeLetter = perf.label.split(' ')[1];
+        counts[gradeLetter] = (counts[gradeLetter] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [data, selectedRatioField, thresholds]);
+
+  const getMajlisSize = (tajnid: number) => {
+    if (tajnid <= sizeThresholds.small) return { label: 'Small', color: 'bg-slate-100 text-slate-600' };
+    if (tajnid <= sizeThresholds.medium) return { label: 'Medium', color: 'bg-slate-200 text-slate-700' };
+    return { label: 'Large', color: 'bg-slate-300 text-slate-800' };
+  };
+
+  // Persist settings
+  useEffect(() => localStorage.setItem('selectedMonth', selectedMonth), [selectedMonth]);
+  useEffect(() => localStorage.setItem('view', view), [view]);
+  useEffect(() => localStorage.setItem('selectedRatioField', selectedRatioField), [selectedRatioField]);
+  useEffect(() => localStorage.setItem('selectedSizeCategory', selectedSizeCategory), [selectedSizeCategory]);
+  useEffect(() => localStorage.setItem('thresholds', JSON.stringify(thresholds)), [thresholds]);
 
   const loadData = async (month: Month) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchSheetData(month);
+      const [result, zaimResult, masterNames] = await Promise.all([
+        fetchSheetData(month),
+        fetchZaimData().catch(err => {
+          console.error('Failed to fetch Zaim data:', err);
+          return [];
+        }),
+        fetchMajlisNames().catch(() => [])
+      ]);
+
       if (result.length === 0) {
         setError(`No data found for ${month}. Please ensure the sheet name is correct and contains data starting from row 2.`);
       }
       setData(result);
+      setZaimData(zaimResult);
+      setMasterMajlisNames(masterNames);
 
       // Fetch all previous months data for comparison starting from Jan26
       const monthIndex = MONTHS.indexOf(month);
@@ -80,15 +144,150 @@ export default function App() {
     }
   };
 
+  const exportToCSV = () => {
+    if (filteredData.length === 0) return;
+    
+    const headers = Object.keys(FIELD_LABELS).map(key => FIELD_LABELS[key as keyof MajlisData]);
+    const rows = filteredData.map(item => 
+      Object.keys(FIELD_LABELS).map(key => item[key as keyof MajlisData])
+    );
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Majlis_Report_${selectedMonth}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const normalizeName = (name: string) => {
+    return name.toLowerCase().replace(/[^a-z0-9\u0980-\u09FF]/g, '').trim();
+  };
+
+  const sendWhatsAppReport = (majlisName: string, recipientType: 'zaim' | 'district' | 'region') => {
+    console.log(`Attempting to send report for: ${majlisName} to ${recipientType}`);
+    
+    const normalizedTarget = normalizeName(majlisName);
+    const majlis = data.find(m => normalizeName(m.majlisName) === normalizedTarget);
+    let zaimInfo = zaimData.find(z => normalizeName(z.majlis) === normalizedTarget);
+    
+    if (!zaimInfo) {
+      console.warn(`No exact match found for Majlis: "${majlisName}" (Normalized: "${normalizedTarget}")`);
+      // Try fuzzy match
+      zaimInfo = zaimData.find(z => 
+        normalizeName(z.majlis).includes(normalizedTarget) || 
+        normalizedTarget.includes(normalizeName(z.majlis))
+      );
+      if (zaimInfo) {
+        console.log(`Found fuzzy match: "${zaimInfo.majlis}" for "${majlisName}"`);
+      }
+    }
+
+    if (!majlis) {
+      console.error(`Majlis data not found for: ${majlisName}`);
+      return;
+    }
+
+    let phone = '';
+    let recipientName = '';
+    let roleTitle = '';
+    
+    if (zaimInfo) {
+      if (recipientType === 'zaim') {
+        phone = zaimInfo.zaimMobile;
+        recipientName = zaimInfo.zaimName;
+        roleTitle = 'Zaim';
+      } else if (recipientType === 'district') {
+        phone = zaimInfo.districtNazimMobile;
+        recipientName = zaimInfo.districtNazimName;
+        roleTitle = 'District Nazim-e-Ala';
+      } else {
+        phone = zaimInfo.regionNazimMobile;
+        recipientName = zaimInfo.regionNazimName;
+        roleTitle = 'Region Nazim-e-Ala';
+      }
+    }
+
+    if (!phone) {
+      alert(`Phone number for ${roleTitle || recipientType} not found for ${majlisName}. Please check the "Zaim" sheet.`);
+      return;
+    }
+
+    // Clean phone number (remove spaces, dashes, etc.)
+    let cleanPhone = phone.replace(/\D/g, '');
+    
+    // Bangladesh specific: if starts with 0 and is 11 digits, prepend 88
+    if (cleanPhone.startsWith('0') && cleanPhone.length === 11) {
+      cleanPhone = '88' + cleanPhone;
+    }
+    
+    // Generate report message
+    const val = majlis[selectedRatioField] as number || 0;
+    const ratio = majlis.tajnidMembers > 0 ? (val / majlis.tajnidMembers) * 100 : 0;
+    const perf = getPerformanceClass(ratio, selectedRatioField);
+
+    // Include key metrics in the message
+    const keyMetrics = [
+      `*${FIELD_LABELS.tajnidMembers}:* ${majlis.tajnidMembers}`,
+      `*${FIELD_LABELS.amelaMeeting}:* ${majlis.amelaMeeting}`,
+      `*${FIELD_LABELS.generalMeeting}:* ${majlis.generalMeeting}`,
+      `*${FIELD_LABELS.generalMeetingAttendance}:* ${majlis.generalMeetingAttendance}`,
+      `*${FIELD_LABELS.fiveTimePrayers}:* ${majlis.fiveTimePrayers}`,
+      `*${FIELD_LABELS.congregationalPrayers}:* ${majlis.congregationalPrayers}`,
+      `*${FIELD_LABELS.mtaConnection}:* ${majlis.mtaConnection}`,
+    ].join('\n');
+
+    const message = `*Majlis Report - ${selectedMonth}*\n` +
+      `*Majlis:* ${majlisName}\n` +
+      `*District:* ${zaimInfo?.district || 'N/A'}\n\n` +
+      `*Performance Summary:* \n` +
+      `*Metric:* ${FIELD_LABELS[selectedRatioField]}\n` +
+      `*Value:* ${val} / ${majlis.tajnidMembers}\n` +
+      `*Ratio:* ${ratio.toFixed(2)}%\n` +
+      `*Grade:* ${perf?.label || 'N/A'}\n\n` +
+      `*Detailed Data:* \n${keyMetrics}\n\n` +
+      `Assalamu Alaikum ${recipientName},\n` +
+      `Here is the monthly report for Majlis ${majlisName}. Please review.`;
+
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
+    
+    console.log(`Opening WhatsApp for ${majlisName} (${recipientType}): ${whatsappUrl}`);
+    const newWindow = window.open(whatsappUrl, '_blank');
+    if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+      console.warn('Popup blocked, using location.href fallback');
+      window.location.href = whatsappUrl;
+    }
+  };
+
   useEffect(() => {
     loadData(selectedMonth);
   }, [selectedMonth]);
 
   const filteredData = useMemo(() => {
-    return data.filter(item => 
-      item.majlisName.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [data, searchTerm]);
+    return data.filter(item => {
+      const matchesSearch = item.majlisName.toLowerCase().includes(searchTerm.toLowerCase());
+      if (!matchesSearch) return false;
+      
+      if (selectedGrade !== 'all') {
+        const val = item[selectedRatioField] as number || 0;
+        const ratio = item.tajnidMembers > 0 ? (val / item.tajnidMembers) * 100 : 0;
+        const perf = getPerformanceClass(ratio, selectedRatioField);
+        if (!perf) return false;
+        return perf.label === `Class ${selectedGrade}`;
+      }
+      
+      return true;
+    });
+  }, [data, searchTerm, selectedGrade, selectedRatioField, thresholds]);
 
   const [showAllStats, setShowAllStats] = useState(false);
 
@@ -110,26 +309,14 @@ export default function App() {
       return totals;
     };
 
-    // Filter out invalid data (ratio > 100%) for the selected field if requested
-    // The user said "Top 10 Majls should discard when percantage is greater than 100 as this data is invalid"
-    // We apply this filtering to the statistics as well to ensure totals are accurate
-    const validFilteredData = filteredData.filter(item => {
-      const val = item[selectedRatioField] as number || 0;
-      const ratio = item.tajnidMembers > 0 ? (val / item.tajnidMembers) * 100 : 0;
-      return ratio <= 100;
-    });
-
-    const current = calculateTotals(validFilteredData);
+    // Calculate totals for current month (filtered by search only)
+    const current = calculateTotals(filteredData);
     
     // Calculate average of all previous months for trend comparison
     const previousTotalsList = allPrevMonthsData.map(monthData => {
       const filteredMonthData = monthData.filter(item => 
         item.majlisName.toLowerCase().includes(searchTerm.toLowerCase())
-      ).filter(item => {
-        const val = item[selectedRatioField] as number || 0;
-        const ratio = item.tajnidMembers > 0 ? (val / item.tajnidMembers) * 100 : 0;
-        return ratio <= 100;
-      });
+      );
       return calculateTotals(filteredMonthData);
     });
 
@@ -145,8 +332,8 @@ export default function App() {
       if (avgVal === null || avgVal === undefined) return null;
       // Use a small threshold to avoid showing trend for tiny differences
       const diff = currVal - avgVal;
-      if (diff > 0.01) return 'up';
-      if (diff < -0.01) return 'down';
+      if (diff > 0.1) return 'up';
+      if (diff < -0.1) return 'down';
       return 'stable';
     };
 
@@ -158,7 +345,60 @@ export default function App() {
     }));
 
     return allStats;
-  }, [data, allPrevMonthsData, searchTerm, selectedRatioField]);
+  }, [data, allPrevMonthsData, searchTerm]);
+
+  const missingReportsInfo = useMemo(() => {
+    if (masterMajlisNames.length === 0) return [];
+    
+    const submittedDataMap = new Map<string, MajlisData>(
+      data.map(m => [normalizeName(m.majlisName), m])
+    );
+
+    return masterMajlisNames
+      .map(name => {
+        const normalized = normalizeName(name);
+        const submission = submittedDataMap.get(normalized);
+        // A report is missing if it's not in the sheet OR if Tajnid is 0
+        const isMissing = !submission || submission.tajnidMembers === 0;
+        return {
+          name,
+          isMissing,
+          status: !submission ? 'Not in sheet' : 'Blank Tajnid'
+        };
+      })
+      .filter(item => item.isMissing)
+      .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b));
+  }, [masterMajlisNames, data, searchTerm]);
+
+  const sendReminder = (majlisName: string) => {
+    const normalizedTarget = normalizeName(majlisName);
+    let zaimInfo = zaimData.find(z => normalizeName(z.majlis) === normalizedTarget);
+    
+    if (!zaimInfo) {
+      zaimInfo = zaimData.find(z => 
+        normalizeName(z.majlis).includes(normalizedTarget) || 
+        normalizedTarget.includes(normalizeName(z.majlis))
+      );
+    }
+
+    if (!zaimInfo || !zaimInfo.zaimMobile) {
+      alert(`Contact info for Zaim of ${majlisName} not found.`);
+      return;
+    }
+
+    let phone = zaimInfo.zaimMobile.replace(/\D/g, '');
+    if (phone.startsWith('0') && phone.length === 11) {
+      phone = '88' + phone;
+    }
+
+    const message = `*Reminder: Monthly Report - ${selectedMonth}*\n` +
+      `Assalamu Alaikum ${zaimInfo.zaimName},\n` +
+      `The monthly report for Majlis *${majlisName}* has not been received yet (Tajnid data is missing).\n\n` +
+      `Please submit the report as soon as possible. Jazakallah.`;
+
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+  };
 
   const chartData = useMemo(() => {
     return filteredData
@@ -185,24 +425,6 @@ export default function App() {
       return typeof data[0]?.[k] === 'number' && k !== 'tajnidMembers' && k !== 'sl';
     }) as (keyof MajlisData)[];
   }, [data]);
-
-  const getPerformanceClass = (ratio: number, field: keyof MajlisData) => {
-    const nonPerformanceFields: (keyof MajlisData)[] = ['tajnidMembers', 'saffAwwal', 'saffDom', 'totalAmelaMembers'];
-    if (nonPerformanceFields.includes(field)) return null;
-
-    if (ratio >= thresholds.A) return { label: 'Class A', color: 'bg-emerald-100 text-emerald-700' };
-    if (ratio >= thresholds.B) return { label: 'Class B', color: 'bg-blue-100 text-blue-700' };
-    if (ratio >= thresholds.C) return { label: 'Class C', color: 'bg-indigo-100 text-indigo-700' };
-    if (ratio >= thresholds.D) return { label: 'Class D', color: 'bg-amber-100 text-amber-700' };
-    if (ratio >= thresholds.E) return { label: 'Class E', color: 'bg-orange-100 text-orange-700' };
-    return { label: 'Class F', color: 'bg-rose-100 text-rose-700' };
-  };
-
-  const getMajlisSize = (tajnid: number) => {
-    if (tajnid <= sizeThresholds.small) return { label: 'Small', color: 'bg-slate-100 text-slate-600' };
-    if (tajnid <= sizeThresholds.medium) return { label: 'Medium', color: 'bg-slate-200 text-slate-700' };
-    return { label: 'Large', color: 'bg-slate-300 text-slate-800' };
-  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -320,7 +542,32 @@ export default function App() {
             <p className="text-slate-500">Real-time analysis of Majlis activities</p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-1.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Grade:</span>
+              <div className="flex gap-1">
+                {['all', 'A', 'B', 'C', 'D', 'E', 'F'].map(grade => (
+                  <button
+                    key={grade}
+                    onClick={() => setSelectedGrade(grade)}
+                    className={cn(
+                      "px-2 h-6 rounded-md text-[10px] font-bold transition-all flex items-center gap-1",
+                      selectedGrade === grade 
+                        ? "bg-indigo-600 text-white shadow-sm" 
+                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                    )}
+                  >
+                    <span>{grade === 'all' ? 'All' : grade}</span>
+                    <span className={cn(
+                      "text-[8px] opacity-60 px-1 rounded-full",
+                      selectedGrade === grade ? "bg-white/20" : "bg-slate-200"
+                    )}>
+                      {gradeCounts[grade] || 0}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
@@ -331,6 +578,14 @@ export default function App() {
                 className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all w-full md:w-64"
               />
             </div>
+            <button 
+              onClick={exportToCSV}
+              className="p-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 transition-all flex items-center gap-2 px-3"
+              title="Export to CSV"
+            >
+              <Download size={18} />
+              <span className="text-xs font-bold hidden sm:inline">Export</span>
+            </button>
             <button 
               onClick={() => setIsSettingsOpen(true)}
               className="p-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 transition-all"
@@ -354,9 +609,16 @@ export default function App() {
         )}
 
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 mb-8">
             {[1, 2, 3, 4, 5].map(i => (
-              <div key={i} className="h-28 bg-white rounded-2xl border border-slate-200 animate-pulse" />
+              <div key={i} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="w-8 h-8 bg-slate-100 rounded-lg animate-pulse" />
+                  <div className="w-12 h-4 bg-slate-100 rounded animate-pulse" />
+                </div>
+                <div className="w-24 h-2 bg-slate-100 rounded mb-2 animate-pulse" />
+                <div className="w-16 h-6 bg-slate-100 rounded animate-pulse" />
+              </div>
             ))}
           </div>
         ) : stats && stats.length > 0 ? (
@@ -408,8 +670,8 @@ export default function App() {
               className="space-y-8"
             >
                 {/* Performance Ranking Chart with Size Selector */}
-                <div className="grid grid-cols-1 gap-8">
-                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                       <div className="flex items-center gap-4">
                         <h3 className="text-lg font-bold flex items-center gap-2">
@@ -477,6 +739,106 @@ export default function App() {
                       * Ratio = ({FIELD_LABELS[selectedRatioField]} / {FIELD_LABELS.tajnidMembers}) × 100
                     </p>
                   </div>
+
+                  <div className="space-y-8">
+                    {/* Top Performers */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <TrendingUp size={16} className="text-emerald-500" />
+                        Top Performers
+                      </h3>
+                      <div className="space-y-3">
+                        {chartData.slice(0, 3).map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between p-3 bg-emerald-50/50 rounded-xl border border-emerald-100">
+                            <div>
+                              <p className="text-xs font-bold text-slate-900">{item.name}</p>
+                              <p className="text-[10px] text-slate-500">{item.value} / {item.tajnid}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-emerald-600">{item.ratio}%</p>
+                              <p className="text-[10px] font-bold text-emerald-500 uppercase">Rank #{idx + 1}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Bottom Performers */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <TrendingDown size={16} className="text-rose-500" />
+                        Needs Attention
+                      </h3>
+                      <div className="space-y-3">
+                        {chartData.slice(-3).reverse().map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between p-3 bg-rose-50/50 rounded-xl border border-rose-100">
+                            <div>
+                              <p className="text-xs font-bold text-slate-900">{item.name}</p>
+                              <p className="text-[10px] text-slate-500">{item.value} / {item.tajnid}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-rose-600">{item.ratio}%</p>
+                              <p className="text-[10px] font-bold text-rose-500 uppercase">Rank #{chartData.length - idx}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Contact Data Status */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                          <Users size={16} className="text-indigo-500" />
+                          Contact Data
+                        </h3>
+                        <span className={cn(
+                          "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase",
+                          zaimData.length > 0 ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"
+                        )}>
+                          {zaimData.length > 0 ? `${zaimData.length} Loaded` : 'Not Loaded'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-relaxed">
+                        WhatsApp buttons require data from the <strong>"Zaim"</strong> sheet to function. 
+                        {zaimData.length === 0 && " Please ensure the sheet name is exactly 'Zaim' and contains data."}
+                      </p>
+                    </div>
+
+                    {/* Missing Reports */}
+                    {missingReportsInfo.length > 0 && (
+                      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                          <AlertCircle size={16} className="text-amber-500" />
+                          Missing Reports ({missingReportsInfo.length})
+                        </h3>
+                        <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                          <div className="space-y-2">
+                            {missingReportsInfo.map((item, idx) => (
+                              <div key={idx} className="flex items-center justify-between p-3 bg-amber-50/50 rounded-xl border border-amber-100">
+                                <div>
+                                  <p className="text-[11px] font-bold text-slate-900">{item.name}</p>
+                                  <span className={cn(
+                                    "text-[9px] font-bold uppercase",
+                                    item.status === 'Blank Tajnid' ? "text-rose-600" : "text-amber-600"
+                                  )}>
+                                    {item.status === 'Blank Tajnid' ? 'Blank Data' : 'Not Submitted'}
+                                  </span>
+                                </div>
+                                <button 
+                                  onClick={() => sendReminder(item.name)}
+                                  className="p-2 bg-white text-amber-600 rounded-lg border border-amber-200 hover:bg-amber-50 transition-colors shadow-sm"
+                                  title="Send Reminder to Zaim"
+                                >
+                                  <MessageSquare size={14} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
               {/* Summary Table Preview */}
@@ -487,8 +849,9 @@ export default function App() {
                 </div>
                 <div className="overflow-x-auto max-h-[500px]">
                   <table className="w-full text-left">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider sticky top-0 z-10">
+                    <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
                       <tr>
+                        <th className="px-6 py-4 font-bold sticky top-0 bg-slate-50 z-10">Actions</th>
                         <th className="px-6 py-4 font-bold">Majlis Name</th>
                         <th className="px-6 py-4 font-bold">Size</th>
                         <th className="px-6 py-4 font-bold">Tajnid</th>
@@ -503,6 +866,31 @@ export default function App() {
                         const perf = getPerformanceClass(item.ratio, selectedRatioField);
                         return (
                           <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-6 py-4">
+                              <div className="flex gap-2">
+                                <button 
+                                  onClick={() => sendWhatsAppReport(item.name, 'zaim')}
+                                  className="p-1.5 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition-colors"
+                                  title="Send to Zaim"
+                                >
+                                  <MessageSquare size={14} />
+                                </button>
+                                <button 
+                                  onClick={() => sendWhatsAppReport(item.name, 'district')}
+                                  className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors"
+                                  title="Send to District Nazim"
+                                >
+                                  <MessageSquare size={14} />
+                                </button>
+                                <button 
+                                  onClick={() => sendWhatsAppReport(item.name, 'region')}
+                                  className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+                                  title="Send to Region Nazim"
+                                >
+                                  <MessageSquare size={14} />
+                                </button>
+                              </div>
+                            </td>
                             <td className="px-6 py-4 font-medium text-slate-900">{item.name}</td>
                             <td className="px-6 py-4">
                               <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase", size.color)}>
@@ -550,23 +938,74 @@ export default function App() {
               </div>
               <div className="overflow-x-auto max-h-[600px]">
                 <table className="w-full text-left border-collapse">
-                  <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
+                  <thead className="sticky top-0 bg-slate-50 z-20 shadow-sm">
                     <tr>
-                      {Object.keys(FIELD_LABELS).map((key) => (
-                        <th key={key} className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 whitespace-nowrap">
-                          {FIELD_LABELS[key as keyof MajlisData]}
-                        </th>
-                      ))}
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 sticky top-0 left-0 bg-slate-50 z-40 w-[140px] min-w-[140px]">
+                        Actions
+                      </th>
+                      {Object.keys(FIELD_LABELS).map((key) => {
+                        const isSL = key === 'sl';
+                        const isMajlis = key === 'majlisName';
+                        return (
+                          <th 
+                            key={key} 
+                            className={cn(
+                              "px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200 whitespace-nowrap",
+                              isSL && "sticky top-0 left-[140px] bg-slate-50 z-40 w-[80px] min-w-[80px]",
+                              isMajlis && "sticky top-0 left-[220px] bg-slate-50 z-40 w-[220px] min-w-[220px]",
+                              !isSL && !isMajlis && "z-10"
+                            )}
+                          >
+                            {FIELD_LABELS[key as keyof MajlisData]}
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredData.map((item, idx) => (
                       <tr key={idx} className="hover:bg-slate-50 transition-colors text-sm">
-                        {Object.keys(FIELD_LABELS).map((key) => (
-                          <td key={key} className="px-4 py-3 text-slate-600 border-b border-slate-50 whitespace-nowrap">
-                            {item[key as keyof MajlisData]}
-                          </td>
-                        ))}
+                        <td className="px-4 py-3 text-slate-600 border-b border-slate-50 sticky left-0 bg-white z-20 w-[140px] min-w-[140px]">
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => sendWhatsAppReport(item.majlisName, 'zaim')}
+                              className="p-1.5 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition-colors"
+                              title="Send to Zaim"
+                            >
+                              <MessageSquare size={14} />
+                            </button>
+                            <button 
+                              onClick={() => sendWhatsAppReport(item.majlisName, 'district')}
+                              className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors"
+                              title="Send to District Nazim"
+                            >
+                              <MessageSquare size={14} />
+                            </button>
+                            <button 
+                              onClick={() => sendWhatsAppReport(item.majlisName, 'region')}
+                              className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+                              title="Send to Region Nazim"
+                            >
+                              <MessageSquare size={14} />
+                            </button>
+                          </div>
+                        </td>
+                        {Object.keys(FIELD_LABELS).map((key) => {
+                          const isSL = key === 'sl';
+                          const isMajlis = key === 'majlisName';
+                          return (
+                            <td 
+                              key={key} 
+                              className={cn(
+                                "px-4 py-3 text-slate-600 border-b border-slate-50 whitespace-nowrap",
+                                isSL && "sticky left-[140px] bg-white z-20 w-[80px] min-w-[80px]",
+                                isMajlis && "sticky left-[220px] bg-white z-20 w-[220px] min-w-[220px]"
+                              )}
+                            >
+                              {item[key as keyof MajlisData]}
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>
@@ -735,12 +1174,15 @@ const StatCard: React.FC<{
           {icon}
         </div>
         {trend && (
-          <div className={cn(
-            "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase",
-            trend === 'up' ? "bg-emerald-50 text-emerald-600" : 
-            trend === 'down' ? "bg-rose-50 text-rose-600" : 
-            "bg-slate-50 text-slate-400"
-          )}>
+          <div 
+            title={`Compared to average of previous months (Jan'26 to last month)`}
+            className={cn(
+              "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase cursor-help",
+              trend === 'up' ? "bg-emerald-50 text-emerald-600" : 
+              trend === 'down' ? "bg-rose-50 text-rose-600" : 
+              "bg-slate-50 text-slate-400"
+            )}
+          >
             {trend === 'up' && <TrendingUp size={10} />}
             {trend === 'down' && <TrendingDown size={10} />}
             {trend === 'stable' && <Minus size={10} />}

@@ -1,4 +1,4 @@
-import { MajlisData, Month } from '../types';
+import { MajlisData, Month, ZaimData } from '../types';
 
 export async function fetchSheetData(month: Month): Promise<MajlisData[]> {
   const url = `/api/data?month=${month}`;
@@ -56,6 +56,61 @@ export async function fetchSheetData(month: Month): Promise<MajlisData[]> {
     }));
   } catch (error) {
     console.error('Error fetching sheet data:', error);
+    throw error;
+  }
+}
+
+export async function fetchZaimData(): Promise<ZaimData[]> {
+  const url = `/api/zaim`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch zaim data from server');
+    }
+
+    const rows = await response.json();
+    
+    // Filter out empty rows (where majlis name is missing)
+    // SL	Majlis	অনুমোদিত যয়ীম আলা/যয়ীম	Mobile No.	District	জেলা নাযেম-আলা	Mobile No.	রিজিওন নাযেম-আলা	Mobile No.
+    return rows
+      .filter((row: any[]) => row[1] && row[1].trim() !== '')
+      .map((row: any[]) => ({
+      sl: row[0] || '',
+      majlis: row[1] || '',
+      zaimName: row[2] || '',
+      zaimMobile: row[3] || '',
+      district: row[4] || '',
+      districtNazimName: row[5] || '',
+      districtNazimMobile: row[6] || '',
+      regionNazimName: row[7] || '',
+      regionNazimMobile: row[8] || '',
+    }));
+  } catch (error) {
+    console.error('Error fetching zaim data:', error);
+    throw error;
+  }
+}
+
+export async function fetchMajlisNames(): Promise<string[]> {
+  const url = `/api/majlis-names`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to fetch majlis names from server');
+    }
+
+    const rows = await response.json();
+    
+    // Filter out empty rows and return the names (usually column B or A)
+    return rows
+      .filter((row: any[]) => row[1] && row[1].trim() !== '')
+      .map((row: any[]) => row[1].trim());
+  } catch (error) {
+    console.error('Error fetching majlis names:', error);
     throw error;
   }
 }

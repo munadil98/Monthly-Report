@@ -5,7 +5,7 @@ import fs from "fs";
 const app = express();
 
 // Helper to fetch data from Google Sheets
-async function fetchGoogleSheetsData(month: string) {
+async function fetchGoogleSheetsData(range: string) {
   const apiKey = process.env.GOOGLE_SHEETS_API_KEY;
   const sheetId = process.env.GOOGLE_SHEET_ID;
 
@@ -13,7 +13,6 @@ async function fetchGoogleSheetsData(month: string) {
     throw new Error("Missing GOOGLE_SHEETS_API_KEY or GOOGLE_SHEET_ID in environment variables.");
   }
 
-  const range = `${month}!A2:AK100`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?key=${apiKey}`;
   
   try {
@@ -46,11 +45,42 @@ app.get("/api/data", async (req, res) => {
   console.log(`[API] Requesting data for: ${month}`);
   
   try {
-    const values = await fetchGoogleSheetsData(month);
+    const range = `${month}!A2:AK1000`;
+    const values = await fetchGoogleSheetsData(range);
     res.json(values);
   } catch (error: any) {
     res.status(500).json({ 
       error: "Failed to fetch data", 
+      details: error.message 
+    });
+  }
+});
+
+app.get("/api/zaim", async (req, res) => {
+  console.log(`[API] Requesting zaim data`);
+  
+  try {
+    const range = `Zaim!A2:I1000`;
+    const values = await fetchGoogleSheetsData(range);
+    res.json(values);
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: "Failed to fetch zaim data", 
+      details: error.message 
+    });
+  }
+});
+
+app.get("/api/majlis-names", async (req, res) => {
+  console.log(`[API] Requesting majlis names data`);
+  
+  try {
+    const range = `'Majlis-Names'!A2:C1000`;
+    const values = await fetchGoogleSheetsData(range);
+    res.json(values);
+  } catch (error: any) {
+    res.status(500).json({ 
+      error: "Failed to fetch majlis names data", 
       details: error.message 
     });
   }
