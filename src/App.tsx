@@ -487,10 +487,9 @@ export default function App() {
 
     const message = `*Reminder: Monthly Report - ${selectedMonth}*\n\n` +
       `আসসালামু আলাইকুম\n` +
-      `জনাব ${zaimInfo?.zaimName || 'যয়িম'}\n` +
-      `যয়িম(আলা), \n` +
+      `জনাব যয়িম(আলা), \n` +
       `${majlisName} মজলিস\n\n` +
-      `*${majlisName} মজলিস*-এর মাসিক প্রতিবেদনটি এখনও পাওয়া যায়নি`;
+      `*${majlisName} মজলিস*-এর ${selectedMonth} মাসিক প্রতিবেদনটি এখনও পাওয়া যায়নি`;
 
     window.open(`https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
@@ -519,6 +518,12 @@ export default function App() {
       .filter(item => item.ratio < thresholds.C)
       .sort((a, b) => a.ratio - b.ratio);
   }, [chartData, thresholds.C]);
+
+  const topPerformersInfo = useMemo(() => {
+    return chartData
+      .filter(item => item.ratio >= thresholds.B)
+      .sort((a, b) => b.ratio - a.ratio);
+  }, [chartData, thresholds.B]);
 
   const ratioFields = useMemo(() => {
     return Object.keys(FIELD_LABELS).filter(key => {
@@ -772,8 +777,9 @@ export default function App() {
             >
                 {/* Performance Ranking Chart with Size Selector */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                  <div className="lg:col-span-2 space-y-8">
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                       <div className="flex items-center gap-4">
                         <h3 className="text-lg font-bold flex items-center gap-2">
                           <BarChart3 size={20} className="text-indigo-600" />
@@ -841,28 +847,49 @@ export default function App() {
                     </p>
                   </div>
 
-                  <div className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     {/* Top Performers */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <TrendingUp size={16} className="text-emerald-500" />
-                        Top Performers
-                      </h3>
-                      <div className="space-y-3">
-                        {chartData.slice(0, 3).map((item, idx) => (
-                          <div key={idx} className="flex items-center justify-between p-3 bg-emerald-50/50 rounded-xl border border-emerald-100">
-                            <div>
-                              <p className="text-xs font-bold text-slate-900">{item.name}</p>
-                              <p className="text-[10px] text-slate-500">{item.value} / {item.tajnid}</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-bold text-emerald-600">{item.ratio}%</p>
-                              <p className="text-[10px] font-bold text-emerald-500 uppercase">Rank #{idx + 1}</p>
-                            </div>
+                    {topPerformersInfo.length > 0 && (
+                      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                          <TrendingUp size={16} className="text-emerald-500" />
+                          Top Performers ({topPerformersInfo.length})
+                        </h3>
+                        <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                          <div className="space-y-2">
+                            {topPerformersInfo.map((item, idx) => {
+                              const perf = getPerformanceClass(item.ratio, selectedRatioField);
+                              return (
+                                <div key={idx} className="flex items-center justify-between p-3 bg-emerald-50/50 rounded-xl border border-emerald-100">
+                                  <div>
+                                    <p className="text-[11px] font-bold text-slate-900">{item.name}</p>
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-[10px] text-slate-500">{item.value} / {item.tajnid}</p>
+                                      <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase", perf?.color)}>
+                                        {perf?.label}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <div className="text-right">
+                                      <p className="text-sm font-bold text-emerald-600">{item.ratio}%</p>
+                                      <p className="text-[9px] font-bold text-emerald-500 uppercase">Rank #{idx + 1}</p>
+                                    </div>
+                                    <button 
+                                      onClick={() => sendWhatsAppReport(item.name, 'zaim')}
+                                      className="p-2 bg-white text-emerald-600 rounded-lg border border-emerald-200 hover:bg-emerald-50 transition-colors shadow-sm"
+                                      title="Send Report to Zaim"
+                                    >
+                                      <MessageSquare size={14} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Needs Attention */}
                     {needsAttentionInfo.length > 0 && (
@@ -905,6 +932,10 @@ export default function App() {
                         </div>
                       </div>
                     )}
+                  </div>
+                </div>
+
+                <div className="space-y-8">
 
                     {/* Contact Data Status */}
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">

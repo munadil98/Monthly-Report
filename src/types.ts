@@ -79,7 +79,7 @@ export const FIELD_LABELS: Record<keyof MajlisData, string> = {
   apjMtaConnection: 'অচল এমটিএ সংযোগ',
   regularMtaViewers: 'নিয়মিত এমটিএ দর্শক',
   regularKhutbaListeners: 'নিয়মিত খুদবা শ্রবণকারী',
-  bookExam: 'পুস্তকের ওপর পরিক্ষা',
+  bookExam: 'পুস্তকের ওপর পরীক্ষা',
   bookSeminar: 'পুস্তকের ওপর সেমিনার',
   studyForumAttendance: 'স্টাডি ফোরামে উপস্থিত',
   nauMobainCount: 'নওমোবাইন সংখ্যা',
