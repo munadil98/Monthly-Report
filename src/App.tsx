@@ -153,9 +153,12 @@ export default function App() {
   const exportToCSV = () => {
     if (filteredData.length === 0) return;
     
-    const headers = Object.keys(FIELD_LABELS).map(key => FIELD_LABELS[key as keyof MajlisData]);
+    const headers = Object.keys(FIELD_LABELS).map(key => `"${FIELD_LABELS[key as keyof MajlisData]}"`);
     const rows = filteredData.map(item => 
-      Object.keys(FIELD_LABELS).map(key => item[key as keyof MajlisData])
+      Object.keys(FIELD_LABELS).map(key => {
+        const val = item[key as keyof MajlisData];
+        return `"${val !== undefined && val !== null ? String(val).replace(/"/g, '""') : ''}"`;
+      })
     );
     
     const csvContent = [
@@ -163,7 +166,7 @@ export default function App() {
       ...rows.map(row => row.join(','))
     ].join('\n');
     
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
